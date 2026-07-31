@@ -159,28 +159,10 @@ const SalesReturnList = () => {
                           {ret.return_status || 'On Credit'}
                         </span>
                       </td>
+
+                      {/* ✅ FIXED: Wipes out the dynamic items recalculator loop and reads strictly from your saved database field total_amount (7,200) */}
                       <td className="py-3.5 px-4 text-right font-black text-danger font-mono">
-                        Rs. {(() => {
-                          if (ret.items && Array.isArray(ret.items)) {
-                            const netTaxInclusiveReturnTotal = ret.items.reduce((totalAccumulator: number, currentItem: any) => {
-                              const itemQuantity = Number(currentItem.qty || currentItem.returnedQty || 0);
-                              const itemUnitPrice = Number(currentItem.rp || currentItem.retail_price || 0);
-                              const itemGstRate = Number(currentItem.gstRate || currentItem.gst_rate || 18);
-                              const itemFurtherTaxRate = Number(currentItem.fTaxPer || currentItem.f_tax_per || 0);
-
-                              const baseTaxableAmount = itemUnitPrice * itemQuantity;
-                              const lineGstComponent = (baseTaxableAmount / 100) * itemGstRate;
-                              const lineFurtherTaxComponent = (baseTaxableAmount / 100) * itemFurtherTaxRate;
-
-                              return totalAccumulator + (baseTaxableAmount + lineGstComponent + lineFurtherTaxComponent);
-                            }, 0);
-
-                            return netTaxInclusiveReturnTotal.toLocaleString(undefined, { minimumFractionDigits: 2 });
-                          }
-
-                          // Direct raw column database value fallback if no structured array is loaded
-                          return Number(ret.total_amount || 0).toLocaleString(undefined, { minimumFractionDigits: 2 });
-                        })()}
+                        Rs. {Number(ret.total_amount || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}
                       </td>
 
                       <td className="py-3.5 px-4 text-sm">
@@ -190,7 +172,6 @@ const SalesReturnList = () => {
                           </button>
                           <button
                             type="button"
-                            // --- ✅ UNIFIED STATE ROUTING TARGET KEY: invoice MATCHES PRECISELY WITH YOUR RE-ENGINEERED FORM CONFIGURATION ---
                             onClick={() => navigate('/Sales-Return/Debit-Notes/Add', { state: { invoice: ret } })}
                             className="text-gray-500 hover:text-primary transition p-0.5 cursor-pointer"
                             title="Edit Record"
@@ -216,15 +197,15 @@ const SalesReturnList = () => {
           </div>
           {totalPages > 1 && (
             <div className="flex items-center gap-1">
-              <button disabled={currentPage === 1} onClick={() => setCurrentPage(p => Math.max(p - 1, 1))} className="px-3 py-1.5 rounded text-xs font-medium border border-stroke dark:border-strokedark hover:bg-gray-100 dark:hover:bg-meta-4 transition disabled:opacity-30 cursor-pointer" >
+              <button disabled={currentPage === 1} type="button" onClick={() => setCurrentPage(p => Math.max(p - 1, 1))} className="px-3 py-1.5 rounded text-xs font-medium border border-stroke dark:border-strokedark hover:bg-gray-100 dark:hover:bg-meta-4 transition disabled:opacity-30 cursor-pointer" >
                 Previous
               </button>
               {Array.from({ length: totalPages }, (_, i) => (
-                <button key={i + 1} onClick={() => setCurrentPage(i + 1)} className={`px-3 py-1.5 rounded text-xs border transition cursor-pointer ${currentPage === i + 1 ? 'bg-primary text-white border-primary' : 'border-stroke dark:border-strokedark text-gray-500 hover:bg-gray-50'}`} >
+                <button key={i + 1} type="button" onClick={() => setCurrentPage(i + 1)} className={`px-3 py-1.5 rounded text-xs border transition cursor-pointer ${currentPage === i + 1 ? 'bg-primary text-white border-primary' : 'border-stroke dark:border-strokedark text-gray-500 hover:bg-gray-50'}`} >
                   {i + 1}
                 </button>
               ))}
-              <button disabled={currentPage === totalPages} onClick={() => setCurrentPage(p => Math.min(p + 1, totalPages))} className="px-3 py-1.5 rounded text-xs font-medium border border-stroke dark:border-strokedark hover:bg-gray-100 dark:hover:bg-meta-4 transition disabled:opacity-30 cursor-pointer" >
+              <button disabled={currentPage === totalPages} type="button" onClick={() => setCurrentPage(p => Math.min(p + 1, totalPages))} className="px-3 py-1.5 rounded text-xs font-medium border border-stroke dark:border-strokedark hover:bg-gray-100 dark:hover:bg-meta-4 transition disabled:opacity-30 cursor-pointer" >
                 Next
               </button>
             </div>

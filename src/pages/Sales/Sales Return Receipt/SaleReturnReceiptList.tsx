@@ -33,43 +33,30 @@ const SaleReturnReceiptList = () => {
     };
 
     // --- ✅ CRITICAL REVERSAL AUTOMATION ENGINE: Mutates parent return bill automatically upon receipt removal ---
-    const handleDeleteReceipt = async (receiptRow: any) => {
-        if (!window.confirm('Are you completely certain you want to permanently delete this receipt? It will automatically restore the unpaid remaining debt balance onto the original return bill.')) return;
+    const handleDeleteReceipt = async (id: string | number) => {
+        if (!window.confirm('Are you certain you want to permanently delete this return receipt record?')) return;
+
         try {
             setLoading(true);
 
-            const { data: targetReturnBill } = await supabase
-                .from('sales_returns')
-                .select('id, payout_amount_paid, total_amount')
-                .eq('id', receiptRow.sales_return_id)
-                .maybeSingle();
+            // ✅ FIXED CLEAN DELETION: Wipes ONLY the row from sales_return_receipts table.
+            // We completely remove any code that was running an update function against 'sales_returns' below this line!
+            const { error: deleteError } = await supabase
+                .from('sales_return_receipts')
+                .delete()
+                .eq('id', id);
 
-            if (targetReturnBill) {
-                // Compute rolled back subtraction calculations safely
-                const restoredPayoutAmountPaid = Math.max(0, (Number(targetReturnBill.payout_amount_paid) || 0) - Number(receiptRow.amount_paid));
-                const rolledBackStatus = restoredPayoutAmountPaid >= Number(targetReturnBill.total_amount) ? 'Paid' : 'On Credit';
+            if (deleteError) throw deleteError;
 
-                // Direct cross-table update execution
-                await supabase
-                    .from('sales_returns')
-                    .update({
-                        payout_amount_paid: restoredPayoutAmountPaid,
-                        return_status: rolledBackStatus
-                    })
-                    .eq('id', targetReturnBill.id);
-            }
-
-            const { error } = await supabase.from('sales_return_receipts').delete().eq('id', receiptRow.id);
-            if (error) throw error;
-
-            toast.success('Receipt removed successfully. Return bill outstanding accounts adjusted.');
-            fetchReceiptsLog();
+            toast.success('Sales return receipt removed cleanly. Parent invoice preserved!');
+            fetchReceiptsListRows(); // Refreshes your active log grid
         } catch (err: any) {
-            toast.error('Processing Failure: ' + err.message);
+            toast.error('Deletion Interrupted: ' + err.message);
         } finally {
             setLoading(false);
         }
     };
+
 
     const filteredReceipts = receipts.filter(rec =>
         String(rec.customer_name).toLowerCase().includes(searchTerm.toLowerCase()) ||

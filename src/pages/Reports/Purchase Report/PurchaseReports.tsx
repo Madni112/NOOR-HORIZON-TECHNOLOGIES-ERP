@@ -1,125 +1,228 @@
 import React, { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { supabase } from '../../../Context/supabaseClient';
 import { toast } from 'react-hot-toast';
 import Spinner from '../../../ui/Spinner';
-import { MdLocalMall, MdFilterList } from 'react-icons/md';
 
 const PurchaseReport = () => {
+  const navigate = useNavigate();
   const [loading, setLoading] = useState(true);
-  const [purchases, setPurchases] = useState<any[]>([]);
-  const [vendorsList, setVendorsList] = useState<string[]>([]);
+  const [activeTab, setActiveTab] = useState<'purchase' | 'return' | 'invoice'>('purchase');
 
-  const [dateFrom, setDateFrom] = useState(new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().split('T')[0]);
-  const [dateTo, setDateTo] = useState(new Date().toISOString().split('T')[0]);
-  const [selectedVendor, setSelectedVendor] = useState('');
+  const [vendors, setVendors] = useState<any[]>([]);
+  const [categories, setCategories] = useState<any[]>([]);
+  const [uoms, setUoms] = useState<any[]>([]);
+  const [brands, setBrands] = useState<any[]>([]);
+  const [products, setProducts] = useState<any[]>([]);
+  const [locations, setLocations] = useState<any[]>([]);
+  const [availableInvoices, setAvailableInvoices] = useState<any[]>([]);
+  const [searchQuery, setSearchQuery] = useState('');
 
+  const getPastWeekDateString = () => {
+    const d = new Date();
+    d.setDate(d.getDate() - 7);
+    return d.toISOString().split('T')[0];
+  };
+
+  const getTodayDateString = () => {
+    return new Date().toISOString().split('T')[0];
+  };
+
+  const [criteria, setCriteria] = useState({
+    vendor: 'All', category: 'All', uom: 'All', brand: 'All',
+    product: 'All', location: 'All', purchaseType: 'All',
+    invoiceNo: 'All',
+    dateFrom: getPastWeekDateString(),
+    dateTo: getTodayDateString()
+  });
   useEffect(() => {
-    const fetchPurchaseReportData = async () => {
+    const fetchPurchaseCriteriaLookups = async () => {
       try {
         setLoading(true);
-        const { data, error } = await supabase
+        const { data: vend } = await supabase.from('vendors').select('id, vendor_name');
+        const { data: cat } = await supabase.from('inventory_categories').select('id, name');
+        const { data: brnd } = await supabase.from('inventory_brands').select('id, name');
+        const { data: prod } = await supabase.from('products').select('id, product_name, category, brand, uom');
+        const { data: loc } = await supabase.from('inventory_locations').select('id, name');
+
+        const { data: purInvoices } = await supabase
           .from('supplier_purchases')
-          .select('*')
-          .order('purchase_date', { ascending: false });
+          .select('id, total_amount, supplier_name, purchase_no')
+          .order('id', { ascending: false });
 
-        if (error) throw error;
-        const pList = data || [];
-        setPurchases(pList);
+        const { data: uomData } = await supabase
+          .from('inventory_uom')
+          .select('id, short_code, full_name')
+          .eq('is_active', true);
 
-        const isolatedVendors = Array.from(new Set(pList.map((p: any) => p.supplier_name).filter(Boolean))) as string[];
-        setVendorsList(isolatedVendors);
+        if (vend) setVendors(vend);
+        if (cat) setCategories(cat);
+        if (brnd) setBrands(brnd);
+        if (prod) setProducts(prod);
+        if (loc) setLocations(loc);
+        if (purInvoices) setAvailableInvoices(purInvoices);
+
+        if (uomData) {
+          const normalizedUoms = uomData.map((u: any) => ({
+            id: u.id,
+            name: `${u.short_code} = ${u.full_name}`
+          }));
+          setUoms(normalizedUoms);
+        }
       } catch (err: any) {
-        toast.error('Procurement history unreadable: ' + err.message);
+        toast.error('Purchase registry lookup interruption: ' + err.message);
       } finally {
         setLoading(false);
       }
     };
-    fetchPurchaseReportData();
+    fetchPurchaseCriteriaLookups();
   }, []);
 
-  const filteredPurchases = purchases.filter(p => {
-    const pDate = p.purchase_date || p.created_at?.split('T')[0];
-    const matchesDate = pDate >= dateFrom && pDate <= dateTo;
-    const matchesVendor = selectedVendor ? p.supplier_name === selectedVendor : true;
-    return matchesDate && matchesVendor;
-  });
+  useEffect(() => {
+    const closePurchaseDropdownOverlay = (e: MouseEvent) => {
+      const target = e.target as HTMLElement;
+      if (!target.closest('.searchable-purchase-dropdown-container')) {
+        document.getElementById('purchase-search-dropdown-list')?.classList.add('hidden');
+      }
+    };
+    window.addEventListener('click', closePurchaseDropdownOverlay);
+    return () => window.removeEventListener('click', closePurchaseDropdownOverlay);
+  }, []);
 
-  const totalProcurementExpensesSum = filteredPurchases.reduce((sum, curr) => sum + (Number(curr.total_amount) || 0), 0);
-  const totalUpfrontPaidSum = filteredPurchases.reduce((sum, curr) => sum + (Number(curr.amount_paid) || 0), 0);
-  const totalVendorCreditDebtSum = Math.max(0, totalProcurementExpensesSum - totalUpfrontPaidSum);
+  const handleInputChange = (field: string, value: any) => {
+    setCriteria(prev => {
+      const updated = { ...prev, [field]: value };
+      if (field === 'brand') updated.product = 'All';
+      return updated;
+    });
+  };
+
+  const getContextualProductSelectionPool = () => {
+    const selectedBrandClean = String(criteria.brand || '').trim().toLowerCase();
+    if (!selectedBrandClean || selectedBrandClean === 'all' || selectedBrandClean === 'all brands') {
+      return products;
+    }
+    return products.filter(p => String(p.brand || '').trim().toLowerCase() === selectedBrandClean);
+  };
+
+  const getFilteredPurchaseInvoices = () => {
+    const term = searchQuery.trim().toLowerCase();
+    if (!term) return availableInvoices;
+    return availableInvoices.filter(i =>
+      String(i.id).includes(term) ||
+      String(i.purchase_no || '').toLowerCase().includes(term) ||
+      String(i.supplier_name || '').toLowerCase().includes(term)
+    );
+  };
+
+  const handleDispatchReportView = () => {
+    if (activeTab === 'invoice' && criteria.invoiceNo === 'All') {
+      toast.error('Please isolate or choose a target document profile reference ID');
+      return;
+    }
+    navigate('/Reports/Purchase-Report/Print', { state: { type: activeTab, filters: criteria } });
+  };
+
+  if (loading) return <div className="flex h-48 items-center justify-center"><Spinner /></div>;
   return (
-    <div className="mx-auto max-w-7xl flex flex-col gap-6 text-black dark:text-bodydark text-xs">
+    <div className="mx-auto max-w-7xl flex flex-col gap-6 text-black dark:text-bodydark text-xs antialiased font-sans relative">
       <div>
-        <h2 className="text-xl font-bold text-black dark:text-white">Wholesale Procurement Expense Report</h2>
-        <p className="text-xs text-gray-400">Trace batch influx expenditures, cash outlays and credit line debt records</p>
+        <h2 className="text-xl font-bold text-black dark:text-white uppercase tracking-wider">Corporate Purchase Auditing Center</h2>
+        <p className="text-xs text-gray-400">Isolate procurement parameters and compile vendor distribution sheets metrics</p>
       </div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        <div className="rounded-sm border border-stroke bg-white p-4 shadow-default dark:border-strokedark dark:bg-boxdark flex items-center justify-between">
-          <div><span className="text-gray-400 font-bold block uppercase text-[10px]">Total Buy Costs</span><b className="text-primary text-base font-black font-mono">Rs. {totalProcurementExpensesSum.toLocaleString(undefined, { minimumFractionDigits: 2 })}</b></div>
-          <div className="p-2.5 bg-primary/10 rounded text-primary"><MdLocalMall size={20} /></div>
-        </div>
-        <div className="rounded-sm border border-stroke bg-white p-4 shadow-default dark:border-strokedark dark:bg-boxdark flex items-center justify-between">
-          <div><span className="text-gray-400 font-bold block uppercase text-[10px]">Liquid Advances Disbursed</span><b className="text-success text-base font-black font-mono">Rs. {totalUpfrontPaidSum.toLocaleString(undefined, { minimumFractionDigits: 2 })}</b></div>
-          <div className="p-2.5 bg-success/10 rounded text-success"><MdLocalMall size={20} /></div>
-        </div>
-        <div className="rounded-sm border border-stroke bg-white p-4 shadow-default dark:border-strokedark dark:bg-boxdark flex items-center justify-between">
-          <div><span className="text-gray-400 font-bold block uppercase text-[10px]">Net Credit Debt Created</span><b className="text-danger text-base font-black font-mono">Rs. {totalVendorCreditDebtSum.toLocaleString(undefined, { minimumFractionDigits: 2 })}</b></div>
-          <div className="p-2.5 bg-danger/10 rounded text-danger"><MdLocalMall size={20} /></div>
-        </div>
+      <div className="flex border-b border-stroke dark:border-strokedark gap-2 bg-white dark:bg-boxdark font-black tracking-wider text-[11px] uppercase text-gray-500">
+        <button type="button" onClick={() => { setActiveTab('purchase'); handleInputChange('invoiceNo', 'All'); setSearchQuery(''); }} className={`py-2.5 px-6 font-bold uppercase transition tracking-wide text-xs border-b-2 cursor-pointer ${activeTab === 'purchase' ? 'border-primary text-primary font-black' : 'border-transparent text-gray-400 hover:text-black dark:hover:text-white'}`}>General Purchase Detail</button>
+        <button type="button" onClick={() => { setActiveTab('return'); handleInputChange('invoiceNo', 'All'); setSearchQuery(''); }} className={`py-2.5 px-6 font-bold uppercase transition tracking-wide text-xs border-b-2 cursor-pointer ${activeTab === 'return' ? 'border-primary text-primary font-black' : 'border-transparent text-gray-400 hover:text-black dark:hover:text-white'}`}>Purchase Return</button>
+        <button type="button" onClick={() => { setActiveTab('invoice'); handleInputChange('invoiceNo', 'All'); setSearchQuery(''); }} className={`py-2.5 px-6 font-bold uppercase transition tracking-wide text-xs border-b-2 cursor-pointer ${activeTab === 'invoice' ? 'border-primary text-primary font-black' : 'border-transparent text-gray-400 hover:text-black dark:hover:text-white'}`}>Purchase Invoice Detail</button>
       </div>
 
       <div className="rounded-sm border border-stroke bg-white shadow-default dark:border-strokedark dark:bg-boxdark p-6">
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6 pb-4 border-b border-stroke dark:border-strokedark">
-          <div>
-            <label className="block text-gray-500 font-bold mb-1">Date From:</label>
-            <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} className="w-full border border-stroke dark:border-strokedark rounded p-2 bg-transparent text-xs font-bold outline-none text-black dark:text-white" />
-          </div>
-          <div>
-            <label className="block text-gray-500 font-bold mb-1">Date To:</label>
-            <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} className="w-full border border-stroke dark:border-strokedark rounded p-2 bg-transparent text-xs font-bold outline-none text-black dark:text-white" />
-          </div>
-          <div>
-            <label className="block text-gray-500 font-bold mb-1">Filter Wholesale Merchant Vendor:</label>
-            <select value={selectedVendor} onChange={(e) => setSelectedVendor(e.target.value)} className="w-full border border-stroke dark:border-strokedark rounded p-2 bg-transparent text-xs font-bold outline-none text-black dark:text-white">
-              <option value="">-- All Vendors --</option>
-              {vendorsList.map(v => <option key={v} value={v}>{v}</option>)}
-            </select>
-          </div>
+        <h3 className="font-bold text-sm text-black dark:text-white mb-4 uppercase tracking-wider text-primary">Report Criteria Specification</h3>
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-4 items-center">
+
+          {activeTab === 'purchase' && (
+            <>
+              <div><label className="block font-bold text-gray-500 mb-1">Procurement Vendor:</label><select value={criteria.vendor} onChange={(e) => handleInputChange('vendor', e.target.value)} className="w-full border rounded p-2 bg-transparent font-semibold text-xs text-black dark:text-white dark:bg-boxdark"><option value="All">All Vendors</option>{vendors.map(v => <option key={v.id} value={v.vendor_name}>{v.vendor_name}</option>)}</select></div>
+              <div><label className="block font-bold text-gray-500 mb-1">Product Category:</label><select value={criteria.category} onChange={(e) => handleInputChange('category', e.target.value)} className="w-full border rounded p-2 bg-transparent font-semibold text-xs text-black dark:text-white dark:bg-boxdark"><option value="All">All Categories</option>{categories.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}</select></div>
+              <div><label className="block font-bold text-gray-500 mb-1">Product Groups (UOM):</label><select value={criteria.uom} onChange={(e) => handleInputChange('uom', e.target.value)} className="w-full border rounded p-2 bg-transparent font-semibold text-xs text-black dark:text-white dark:bg-boxdark"><option value="All">All Groups</option>{uoms.map(u => <option key={u.id} value={u.name}>{u.name}</option>)}</select></div>
+              <div><label className="block font-bold text-gray-500 mb-1">Brands Allocation:</label><select value={criteria.brand} onChange={(e) => handleInputChange('brand', e.target.value)} className="w-full border rounded p-2 bg-transparent font-semibold text-xs text-black dark:text-white dark:bg-boxdark"><option value="All">All Brands</option>{brands.map(b => <option key={b.id} value={b.name}>{b.name}</option>)}</select></div>
+              <div>
+                <label className="block font-bold text-gray-500 mb-1">Target Stock Assets:</label>
+                <select value={criteria.product} onChange={(e) => handleInputChange('product', e.target.value)} className="w-full border rounded p-2 bg-transparent font-semibold text-xs text-black dark:text-white dark:bg-boxdark">
+                  <option value="All">All Products ({getContextualProductSelectionPool().length} Options Available)</option>
+                  {getContextualProductSelectionPool().map(p => <option key={p.id} value={p.product_name}>{p.product_name}</option>)}
+                </select>
+              </div>
+              <div><label className="block font-bold text-gray-500 mb-1">Warehouse Locations:</label><select value={criteria.location} onChange={(e) => handleInputChange('location', e.target.value)} className="w-full border rounded p-2 bg-transparent font-semibold text-xs text-black dark:text-white dark:bg-boxdark"><option value="All">All Bins</option>{locations.map(l => <option key={l.id} value={l.name}>{l.name}</option>)}</select></div>
+              <div><label className="block font-bold text-gray-500 mb-1">Purchase Type Settlement:</label><select value={criteria.purchaseType} onChange={(e) => handleInputChange('purchaseType', e.target.value)} className="w-full border rounded p-2 bg-transparent font-semibold text-xs text-black dark:text-white dark:bg-boxdark"><option value="All">All Flows</option><option value="Cash">Cash Basis</option><option value="Credit">On Corporate Credit</option></select></div>
+            </>
+          )}
+          {activeTab === 'return' && (
+            <>
+              <div><label className="block font-bold text-gray-500 mb-1">Procurement Vendor:</label><select value={criteria.vendor} onChange={(e) => handleInputChange('vendor', e.target.value)} className="w-full border rounded p-2 bg-transparent font-semibold text-xs text-black dark:text-white dark:bg-boxdark"><option value="All">All Vendors</option>{vendors.map(v => <option key={v.id} value={v.vendor_name}>{v.vendor_name}</option>)}</select></div>
+              <div><label className="block font-bold text-gray-500 mb-1">Product Category:</label><select value={criteria.category} onChange={(e) => handleInputChange('category', e.target.value)} className="w-full border rounded p-2 bg-transparent font-semibold text-xs text-black dark:text-white dark:bg-boxdark"><option value="All">All Categories</option>{categories.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}</select></div>
+              <div><label className="block font-bold text-gray-500 mb-1">Product Groups (UOM):</label><select value={criteria.uom} onChange={(e) => handleInputChange('uom', e.target.value)} className="w-full border rounded p-2 bg-transparent font-semibold text-xs text-black dark:text-white dark:bg-boxdark"><option value="All">All Groups</option>{uoms.map(u => <option key={u.id} value={u.name}>{u.name}</option>)}</select></div>
+              <div><label className="block font-bold text-gray-500 mb-1">Brands Allocation:</label><select value={criteria.brand} onChange={(e) => handleInputChange('brand', e.target.value)} className="w-full border rounded p-2 bg-transparent font-semibold text-xs text-black dark:text-white dark:bg-boxdark"><option value="All">All Brands</option>{brands.map(b => <option key={b.id} value={b.name}>{b.name}</option>)}</select></div>
+              <div>
+                <label className="block font-bold text-gray-500 mb-1">Target Stock Assets:</label>
+                <select value={criteria.product} onChange={(e) => handleInputChange('product', e.target.value)} className="w-full border rounded p-2 bg-transparent font-semibold text-xs text-black dark:text-white dark:bg-boxdark">
+                  <option value="All">All Products ({getContextualProductSelectionPool().length} Options Available)</option>
+                  {getContextualProductSelectionPool().map(p => <option key={p.id} value={p.product_name}>{p.product_name}</option>)}
+                </select>
+              </div>
+              <div><label className="block font-bold text-gray-500 mb-1">Warehouse Locations:</label><select value={criteria.location} onChange={(e) => handleInputChange('location', e.target.value)} className="w-full border rounded p-2 bg-transparent font-semibold text-xs text-black dark:text-white dark:bg-boxdark"><option value="All">All Bins</option>{locations.map(l => <option key={l.id} value={l.name}>{l.name}</option>)}</select></div>
+            </>
+          )}
+
+          {activeTab === 'invoice' && (
+            <div className="md:col-span-3 searchable-purchase-dropdown-container relative">
+              <label className="block font-bold text-gray-500 mb-1">Select Target Purchase Invoice Profile: *</label>
+              <div
+                onClick={(e) => { e.stopPropagation(); document.getElementById('purchase-search-dropdown-list')?.classList.toggle('hidden'); }}
+                className="w-full rounded border border-stroke dark:border-strokedark p-2 text-xs bg-white dark:bg-boxdark font-bold text-black dark:text-white cursor-pointer flex justify-between items-center h-[34px]"
+              >
+                <span>
+                  {criteria.invoiceNo !== 'All' ? (() => {
+                    const matched = availableInvoices.find(i => String(i.id) === String(criteria.invoiceNo));
+                    return matched ? `${matched.purchase_no || `ID: ${matched.id}`} (${matched.supplier_name})` : `PUR-INV-${criteria.invoiceNo}`;
+                  })() : `-- Choose Available Purchase Records List (${getFilteredPurchaseInvoices().length} Found) --`}
+                </span>
+                <span className="text-gray-400 text-[9px]">▼</span>
+              </div>
+
+              <div id="purchase-search-dropdown-list" className="hidden absolute top-full left-0 w-full bg-white dark:bg-boxdark border border-stroke dark:border-strokedark shadow-xl rounded-sm mt-1 z-99999 p-2 space-y-2" onClick={(e) => e.stopPropagation()}>
+                <input
+                  type="text"
+                  placeholder="Search vendor name or transaction code parameters..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="w-full rounded border border-stroke p-1.5 text-xs bg-transparent text-black dark:text-white outline-none focus:border-primary font-bold"
+                />
+                <div className="max-h-40 overflow-y-auto space-y-1 font-bold text-xs text-black dark:text-white">
+                  <div onClick={() => { handleInputChange('invoiceNo', 'All'); document.getElementById('purchase-search-dropdown-list')?.classList.add('hidden'); }} className="p-2 hover:bg-primary hover:text-white cursor-pointer rounded-sm text-gray-400 italic">-- All Invoice Ledgers --</div>
+                  {getFilteredPurchaseInvoices().map(inv => (
+                    <div key={inv.id} onClick={() => { handleInputChange('invoiceNo', String(inv.id)); document.getElementById('purchase-search-dropdown-list')?.classList.add('hidden'); }} className="p-2 hover:bg-primary hover:text-white cursor-pointer rounded-sm transition-colors">
+                      {inv.purchase_no || `ID: ${inv.id}`} ({inv.supplier_name}) - Rs. {Number(inv.total_amount || 0).toLocaleString()}
+                    </div>
+                  ))}
+                  {getFilteredPurchaseInvoices().length === 0 && <div className="p-2 text-center text-gray-400 italic">No procurement records found.</div>}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {activeTab !== 'invoice' && (
+            <>
+              <div><label className="block font-bold text-gray-500 mb-1">Date From (Start):</label><input type="date" value={criteria.dateFrom} onChange={(e) => handleInputChange('dateFrom', e.target.value)} className="w-full border border-stroke rounded p-2 bg-transparent font-semibold text-black dark:text-white text-xs outline-none dark:bg-boxdark" /></div>
+              <div><label className="block font-bold text-gray-500 mb-1">Date To (End Date):</label><input type="date" value={criteria.dateTo} onChange={(e) => handleInputChange('dateTo', e.target.value)} className="w-full border border-stroke rounded p-2 bg-transparent font-semibold text-black dark:text-white text-xs outline-none dark:bg-boxdark" /></div>
+            </>
+          )}
         </div>
 
-        {loading ? (
-          <div className="flex h-32 items-center justify-center"><Spinner /></div>
-        ) : filteredPurchases.length === 0 ? (
-          <p className="text-center py-8 italic text-gray-400">No consignment rows recorded within these matrix parameter boundaries.</p>
-        ) : (
-          <div className="max-w-full overflow-x-auto">
-            <table className="w-full table-auto border-collapse text-left">
-              <thead>
-                <tr className="bg-gray-2 dark:bg-meta-4 font-bold border-b border-stroke text-black dark:text-white text-[10px] uppercase tracking-wider">
-                  <th className="p-3 w-16">S#</th>
-                  <th className="p-3">Purchase No #</th>
-                  <th className="p-3">Vendor Merchant Profile</th>
-                  <th className="p-3">Receiving Storage Bin</th>
-                  <th className="p-3 text-center">Payment Term Group</th>
-                  <th className="p-3 text-right pr-6">Consignment Value</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filteredPurchases.map((p, idx) => (
-                  <tr key={p.id} className="border-b font-semibold border-stroke dark:border-strokedark text-black dark:text-white hover:bg-slate-50/40">
-                    <td className="p-3 text-gray-400">{idx + 1}</td>
-                    <td className="p-3 font-mono font-black text-primary">{p.purchase_no}</td>
-                    <td className="p-3 whitespace-nowrap">{p.supplier_name}</td>
-                    <td className="p-3 text-gray-400 uppercase font-black tracking-wide">{p.target_warehouse}</td>
-                    <td className="p-3 text-center"><span className={`px-2 py-0.5 rounded text-[10px] border font-bold ${p.payment_term === 'On Credit' ? 'bg-purple-50 text-purple-600 border-purple-200' : 'bg-blue-50 text-blue-600 border-blue-200'}`}>{p.payment_term}</span></td>
-                    <td className="p-3 text-right font-mono font-black text-success pr-6">Rs. {Number(p.total_amount || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
+        <div className="mt-8 pt-4 border-t border-stroke dark:border-strokedark flex justify-end">
+          <button type="button" onClick={handleDispatchReportView} className="rounded bg-primary py-2.5 px-12 font-bold text-white hover:bg-opacity-90 transition text-xs shadow-sm h-9 cursor-pointer uppercase tracking-wider">Show Report</button>
+        </div>
       </div>
     </div>
   );

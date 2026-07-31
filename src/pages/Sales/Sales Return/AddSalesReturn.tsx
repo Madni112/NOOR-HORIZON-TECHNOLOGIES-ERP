@@ -25,7 +25,6 @@ const AddSalesReturn = () => {
   const [isSelectionMade, setIsSelectionMade] = useState(isEditMode || isDirectInvoiceLink);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
-  // --- ✅ NEW TRACKING STATES: Remembers the original invoice cash layout counters ---
   const [origInvoiceCashMetrics, setOrigInvoiceCashMetrics] = useState({
     grandTotal: 0,
     cashReceivedBox: 0
@@ -77,16 +76,26 @@ const AddSalesReturn = () => {
           setIsSelectionMade(true);
           setIsDropdownOpen(false);
 
-          if ((!routeStateData.items || routeStateData.items.length === 0 || !routeStateData.items?.itemName) && invoicesData) {
-            const originInvoiceMatch = invoicesData.find(i => String(i.id) === String(extractedCleanInvoiceId));
-            if (originInvoiceMatch) {
-              setReturnInitData((prev: any) => ({
-                ...prev,
-                customerName: originInvoiceMatch.customer_name,
-                items: originInvoiceMatch.items || prev.items
-              }));
-            }
-          }
+          // ✅ THE FIX: Explicitly queries your true sales_returns table to capture your real saved payout value
+          const { data: actualReturnRecord } = await supabase
+            .from('sales_returns')
+            .select('payout_amount_paid, total_amount')
+            .eq('id', routeStateData.id)
+            .maybeSingle();
+
+          const realPayout = actualReturnRecord ? Number(actualReturnRecord.payout_amount_paid || 0) : Number(routeStateData.payout_amount_paid || 0);
+
+          setReturnInitData({
+            returnNo: `RTN-${String(routeStateData.id).padStart(4, '0')}`,
+            returnDate: routeStateData.return_date || new Date().toISOString().split('T')[0],
+            invoiceIdRef: extractedCleanInvoiceId,
+            customerName: routeStateData.customer_name || '',
+            settlementMode: routeStateData.settlement_mode || 'Cash',
+            selectedBankAccountId: routeStateData.linked_bank_title || '',
+            // ✅ FORCES FORMIK TO INITIALIZE UN-MUTATED FIELD VALUE (7200)
+            payoutAmountPaid: realPayout,
+            items: routeStateData.items || []
+          });
         } else if (isDirectInvoiceLink && routeStateData) {
           setInvoiceSearchQuery(`INV-${routeStateData.id} (${routeStateData.customer_name})`);
           setIsSelectionMade(true);
@@ -131,7 +140,6 @@ const AddSalesReturn = () => {
 
     setFilteredInvoices(filtered);
   }, [invoiceSearchQuery, defaultInvoices, isSelectionMade, isEditMode]);
-
   const verifyInvoiceReturnStateGuard = async (invoiceId: string | number) => {
     if (!invoiceId || isEditMode) return;
     try {
@@ -173,6 +181,7 @@ const AddSalesReturn = () => {
     ['-', 'e', 'E', '+'].includes(e.key) && e.preventDefault();
 
   if (initialLoading) return <div className="flex h-48 items-center justify-center"><Spinner /></div>;
+
   return (
     <div className="mx-auto max-w-7xl flex flex-col gap-6 text-black dark:text-white text-xs">
       <div className="rounded-sm border border-stroke bg-white shadow-default dark:border-strokedark dark:bg-boxdark">
@@ -311,7 +320,7 @@ const AddSalesReturn = () => {
                                 });
                                 setIsDropdownOpen(false);
                               }}
-                              className={`p-2.5 hover:bg-slate-100 dark:hover:bg-meta-4 cursor-pointer text-xs font-bold text-black dark:text-white border-b border-stroke last:border-0 duration-100`}
+                              className="p-2.5 hover:bg-slate-100 dark:hover:bg-meta-4 cursor-pointer text-xs font-bold text-black dark:text-white border-b border-stroke last:border-0 duration-100"
                             >
                               📄 INV-{String(inv.id).padStart(4, '0')} - {inv.customer_name} (Rs. {Number(inv.total_amount || 0).toLocaleString()})
                             </div>
@@ -327,6 +336,7 @@ const AddSalesReturn = () => {
                     <input type="text" name="customerName" disabled value={values.customerName} className="w-full rounded border border-stroke p-2 text-sm bg-gray-100 dark:bg-meta-4/20 text-gray-500 font-bold outline-none cursor-not-allowed" placeholder="Linked Account Name..." />
                   </div>
                 </div>
+
                 <div className="w-full overflow-x-auto rounded-sm border border-stroke dark:border-strokedark mb-6 whitespace-nowrap">
                   <table className="w-full table-auto border-collapse text-[12px] min-w-[1200px]">
                     <thead>
@@ -373,7 +383,6 @@ const AddSalesReturn = () => {
                     </tbody>
                   </table>
                 </div>
-
                 <div className="flex flex-col md:flex-row justify-between gap-10 mt-6 px-4 pb-4">
                   <div className="flex flex-col gap-4 w-full md:w-1/2 border border-stroke p-4 rounded dark:border-strokedark bg-slate-50/10 space-y-1">
                     <div>
@@ -418,18 +427,19 @@ const AddSalesReturn = () => {
                         name="payoutAmountPaid"
                         onKeyDown={blockInvalidChar}
                         onChange={handleChange}
-                        value={values.payoutAmountPaid}
+                        value={isEditMode && routeStateData ? routeStateData.payout_amount_paid : values.payoutAmountPaid}
                         placeholder="Enter paid back amount..."
                         className="w-full rounded border border-stroke p-2 bg-transparent text-right font-black text-danger text-sm focus:border-primary outline-none text-black dark:text-white"
                       />
                     </div>
+
                   </div>
+
                   <div className="w-full md:w-1/3 space-y-3 text-xs text-black dark:text-white font-semibold">
-                    {/* --- ✅ LIVE AUDIT MONITOR BAR: SHOWS THE ORIGINAL DOWN PAYMENT CASH CLEARLY --- */}
                     {values.invoiceIdRef && (
                       <div className="bg-blue-50/50 dark:bg-meta-4/20 border border-blue-200 rounded p-3 space-y-1.5 font-mono text-[11px] text-gray-500 dark:text-gray-300">
                         <h5 className="font-bold text-primary dark:text-white text-[10px] uppercase tracking-wide">📄 Source Invoice Audit Profile</h5>
-                        <div className="flex justify-between"><span>Orig Grand Total:</span><b className="text-black dark:text-white">Rs. {origInvoiceCashMetrics.grandTotal.toLocaleString()}</b></div>
+                        <div className="flex justify-between"><span>Original Grand Total:</span><b className="text-black dark:text-white">Rs. {origInvoiceCashMetrics.grandTotal.toLocaleString()}</b></div>
                         <div className="flex justify-between border-t pt-1 border-blue-100 dark:border-strokedark"><span>Counter Cash Paid:</span><b className="text-success font-black text-xs">Rs. {origInvoiceCashMetrics.cashReceivedBox.toLocaleString()}</b></div>
                       </div>
                     )}

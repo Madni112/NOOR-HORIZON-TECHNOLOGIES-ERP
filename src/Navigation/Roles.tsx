@@ -1,4 +1,4 @@
-import { MdDashboard, MdReceipt, MdPeople, MdAdminPanelSettings, MdEmojiTransportation, MdEdit, MdInventory2, MdClass, MdAccountBox, MdCategory, MdStraighten, MdDomain, MdInventory, MdBadge, MdShoppingCart, MdLocationOn, MdLocalShipping, MdCompareArrows, MdFormatListBulleted, MdAccountTree, MdReceiptLong, MdAccountBalance, MdLaptop, MdLaptopChromebook, MdMan, MdRequestPage, MdOutlineRequestPage, MdPageview, MdSpaceDashboard } from 'react-icons/md';
+import { MdDashboard, MdReceipt, MdPeople, MdAdminPanelSettings, MdEmojiTransportation, MdEdit, MdInventory2, MdClass, MdAccountBox, MdCategory, MdStraighten, MdDomain, MdInventory, MdBadge, MdShoppingCart, MdLocationOn, MdLocalShipping, MdCompareArrows, MdFormatListBulleted, MdAccountTree, MdReceiptLong, MdAccountBalance, MdLaptop, MdLaptopChromebook, MdMan, MdRequestPage, MdOutlineRequestPage, MdPageview, MdSpaceDashboard, MdOutlineLaptop } from 'react-icons/md';
 import Dashboard from '../pages/Dashboard/Dashboard';
 import NewInvoice from '../pages/Sales/Invoice/NewInvoice';
 import SalesHistory from '../pages/Sales/Invoice/SalesHistory';
@@ -57,6 +57,9 @@ import AccountReport from '../pages/Reports/Account Report/AccountReport';
 import SaleReportPrint from '../pages/Reports/Sales Report/SaleReportPrint';
 import SaleReturnReceiptList from '../pages/Sales/Sales Return Receipt/SaleReturnReceiptList';
 import SaleReturnReceiptAdd from '../pages/Sales/Sales Return Receipt/SalesReturnReceiptAdd';
+import PurchaseReportPrint from '../pages/Reports/Purchase Report/PurchaseReportPrint';
+import StockReportPrint from '../pages/Reports/Stock Report/StockReportPrint';
+import AccountReportPrint from '../pages/Reports/Account Report/AccountReportPrint';
 
 export const adminRoutes = [
   {
@@ -159,12 +162,6 @@ export const adminRoutes = [
         label: 'Opening Stock',
         icon: MdInventory
       },
-      {
-        path: '/Registration/InvoiceReceipt/List',
-        component: <InvoiceReceiptList />,
-        label: 'Invoice Receipt',
-        icon: MdReceipt
-      }
     ]
   },
   {
@@ -178,6 +175,12 @@ export const adminRoutes = [
         component: <SalesHistory />
       },
       {
+        path: '/Registration/InvoiceReceipt/List',
+        component: <InvoiceReceiptList />,
+        label: 'Invoice Receipt',
+        icon: MdReceipt
+      },
+      {
         label: 'Sales Return',
         icon: MdEdit,
         path: '/Sales-Return/Debit-Notes/List',
@@ -185,9 +188,9 @@ export const adminRoutes = [
       },
       {
         label: 'Sales Return Receipt',
-        icon: MdReceipt,
+        icon: MdEdit,
         path: '/sales/sales-return-receipt/list',
-        component: <SaleReturnReceiptList/>
+        component: <SaleReturnReceiptList />
       },
       {
         label: 'Customers',
@@ -212,72 +215,72 @@ export const adminRoutes = [
   {
     label: 'Purchase',
     icon: MdLaptop,
-    children:[
+    children: [
       {
         label: 'Purchases',
         path: '/Purchase/Purchases/List',
-        component: <PurchaseList/>,
-        icon: MdLaptopChromebook
-      },
-      {
-        label: 'Purchase Return',
-        path: '/Purchase/Purchase-Return/List',
-        component: <PurchaseReturnList/>,
+        component: <PurchaseList />,
         icon: MdLaptopChromebook
       },
       {
         label: 'Purchase Receipt',
         path: '/Purchase/Purchase-Receipt/List',
-        component: <PurchaseReceiptList/>,
-        icon: MdRequestPage 
+        component: <PurchaseReceiptList />,
+        icon: MdOutlineLaptop
+      },
+      {
+        label: 'Purchase Return',
+        path: '/Purchase/Purchase-Return/List',
+        component: <PurchaseReturnList />,
+        icon: MdRequestPage
       },
       {
         label: 'Purchase Return Receipt',
         path: '/Purchase/Purchase-Return-Receipt/List',
-        component: <PurchaseReturnReceiptList/>,
+        component: <PurchaseReturnReceiptList />,
         icon: MdOutlineRequestPage
       },
       {
         label: 'Vendor',
         path: '/Purchase/Vendor/List',
-        component: <VendorList/>,
+        component: <VendorList />,
         icon: MdMan
       }
-      
+
     ]
   },
   {
     label: 'Reports',
     icon: MdPageview,
-    children:[
+    children: [
       {
         label: 'Report Dashboard',
         path: '/Reports/Reports-Dashboard',
-        component: <ReportDashboard/>,
+        component: <ReportDashboard />,
         icon: MdSpaceDashboard
       },
       {
         label: 'Sales Reports',
         path: '/Reports/Sales-Report',
-        component: <SalesReport/>,
+        component: <SalesReport />,
 
       },
       {
         label: 'Purchase Reports',
         path: '/Reports/Purchase-Report',
-        component: <PurchaseReport/>,
-        
+        component: <PurchaseReport />,
+
       },
       {
         label: 'Stock Reports',
         path: '/Reports/Stock-Report',
-        component: <StockReport/>,
+        component: <StockReport />,
 
       },
       {
         label: 'Account Reports',
         path: '/Reports/Account-Report',
-        component: <AccountReport/>,
+        component: <AccountReport />,
 
       }
     ]
@@ -379,42 +382,57 @@ export const adminRoutes = [
   },
   {
     path: '/Registration/MultiInvoiceReceipt/Add',
-    component: <AddMultiInvoiceReceipt/>,
+    component: <AddMultiInvoiceReceipt />,
     hideFromSidebar: true
   },
   {
     path: '/Purchase/Purchases/Add',
-    component: <AddPurchases/>,
+    component: <AddPurchases />,
     hideFromSidebar: true
   },
   {
     path: '/Purchase/Vendor/Add',
-    component: <AddVendor/>,
+    component: <AddVendor />,
     hideFromSidebar: true
   },
   {
     path: '/Purchase/Purchase-Receipt/Add',
-    component: <AddPurchaseReceipt/>,
+    component: <AddPurchaseReceipt />,
     hideFromSidebar: true
   },
   {
     path: '/Purchase/Purchase-Return/Add',
-    component: <AddPurchaseReturn/>,
+    component: <AddPurchaseReturn />,
     hideFromSidebar: true
   },
   {
     path: '/Purchase/Purchase-Return-Receipt/Add',
-    component: <AddPurchaseReturnReceipt/>,
+    component: <AddPurchaseReturnReceipt />,
     hideFromSidebar: true
   },
   {
     path: '/Reports/Sales-Report/Print',
-    component: <SaleReportPrint/>,
+    component: <SaleReportPrint />,
     hideFromSidebar: true
   },
   {
     path: '/sales/sales-return-receipt/add',
-    component: <SaleReturnReceiptAdd/>,
+    component: <SaleReturnReceiptAdd />,
+    hideFromSidebar: true
+  },
+  {
+    path: '/Reports/Purchase-Report/Print',
+    component: <PurchaseReportPrint />,
+    hideFromSidebar: true
+  },
+  {
+    path: '/Reports/Stock-Report/Print',
+    component: <StockReportPrint />,
+    hideFromSidebar: true
+  },
+  {
+    path: '/Reports/Account-Report/Print',
+    component: <AccountReportPrint/>,
     hideFromSidebar: true
   }
 ];

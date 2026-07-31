@@ -4,11 +4,14 @@ import * as Yup from 'yup';
 import { supabase } from '../../../Context/supabaseClient';
 import { toast } from 'react-hot-toast';
 import Spinner from '../../../ui/Spinner';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { FiPlus, FiTrash2 } from 'react-icons/fi';
 
 const NewInvoice = () => {
   const navigate = useNavigate();
+  const location = useLocation();
+  const editData = location.state?.invoice || location.state?.record || null;
+
   const [loading, setLoading] = useState(false);
   const [initialLoading, setInitialLoading] = useState(false);
 
@@ -18,6 +21,7 @@ const NewInvoice = () => {
   const [transportList, setTransportList] = useState<any[]>([]);
   const [warehousesList, setWarehousesList] = useState<any[]>([]);
   const [banksList, setBanksList] = useState<any[]>([]);
+
   useEffect(() => {
     const fetchCompleteEnterpriseCatalog = async () => {
       try {
@@ -46,6 +50,33 @@ const NewInvoice = () => {
     };
     fetchCompleteEnterpriseCatalog();
   }, []);
+  const getFormInitialValues = () => {
+    if (editData) {
+      return {
+        customerName: editData.customer_name || editData.customerName || '',
+        saleDate: editData.sale_date || new Date().toISOString().split('T')[0],
+        paymentTerm: editData.payment_term || 'Cash',
+        dispatchWarehouse: editData.dispatch_warehouse || '',
+        fbrScenario: editData.scenario_type || 'Goods at Standard Rate to Registered Buyers',
+        salesman: editData.salesman || '',
+        transportType: editData.transport_name || 'No Transport (Handover)',
+        transportCharges: Number(editData.transport_charges || 0),
+        settlementMode: editData.selected_bank ? 'Bank' : 'Cash',
+        selectedBankTitle: editData.selected_bank || '',
+        cashAmountPaid: Number(editData.cash_amount_paid || editData.bank_amount || 0),
+        dcNo: editData.dc_no || '',
+        items: Array.isArray(editData.items) ? editData.items : JSON.parse(editData.items || '[]')
+      };
+    }
+    return {
+      customerName: '', saleDate: new Date().toISOString().split('T')[0], paymentTerm: 'Cash',
+      dispatchWarehouse: '', fbrScenario: 'Goods at Standard Rate to Registered Buyers', salesman: '',
+      transportType: 'No Transport (Handover)', transportCharges: 0, settlementMode: 'Cash',
+      selectedBankTitle: '', cashAmountPaid: 0, dcNo: '',
+      items: [{ itemName: '', qty: 1, rp: 0, gstRate: 18, fTaxPer: 0, amount: 0, availableQty: 0 }]
+    };
+  };
+
   const validationSchema = Yup.object().shape({
     customerName: Yup.string().required('Required Field'),
     saleDate: Yup.string().required('Required Field'),
@@ -72,6 +103,7 @@ const NewInvoice = () => {
       })
     ).min(1)
   });
+
   const handleProductSelectionWithWH = async (selectedName: string, index: number, chosenWarehouse: string, setFieldValue: any) => {
     const matchingProduct = productsList.find(p => p.product_name === selectedName);
     if (!matchingProduct) {
@@ -79,7 +111,6 @@ const NewInvoice = () => {
       setFieldValue(`items.${index}.availableQty`, 0);
       return;
     }
-
     setFieldValue(`items.${index}.itemName`, matchingProduct.product_name);
     setFieldValue(`items.${index}.rp`, Number(matchingProduct.retail_price) || 0);
 
@@ -87,7 +118,6 @@ const NewInvoice = () => {
       setFieldValue(`items.${index}.availableQty`, 0);
       return;
     }
-
     try {
       const { data: whStock, error } = await supabase
         .from('warehouse_inventory')
@@ -143,22 +173,20 @@ const NewInvoice = () => {
     ['-', 'e', 'E', '+'].includes(e.key) && e.preventDefault();
 
   if (initialLoading) return <div className="flex h-48 items-center justify-center"><Spinner /></div>;
+
   return (
     <div className="mx-auto max-w-7xl text-black dark:text-bodydark text-xs font-sans relative">
       <div className="rounded-sm border border-stroke bg-white shadow-default dark:border-strokedark dark:bg-boxdark p-6">
         <div className="flex items-center justify-between border-b border-stroke pb-4 mb-6 dark:border-strokedark">
-          <h3 className="font-semibold text-black dark:text-white text-base">Generate Commercial Sales Invoice</h3>
+          <h3 className="font-semibold text-black dark:text-white text-base">
+            {editData ? `Modify Historical Sales Invoice Reference # ${editData.id}` : 'Generate Commercial Sales Invoice'}
+          </h3>
           <button type="button" onClick={() => navigate('/sales/invoice/list')} className="text-sm font-medium text-primary hover:underline">See Logs List</button>
         </div>
 
         <Formik
-          initialValues={{
-            customerName: '', saleDate: new Date().toISOString().split('T'), paymentTerm: 'Cash',
-            dispatchWarehouse: '', fbrScenario: 'Goods at Standard Rate to Registered Buyers', salesman: '',
-            transportType: 'No Transport (Handover)', transportCharges: 0, settlementMode: 'Cash',
-            selectedBankTitle: '', cashAmountPaid: 0, dcNo: '',
-            items: [{ itemName: '', qty: 1, rp: 0, gstRate: 18, fTaxPer: 0, amount: 0, availableQty: 0 }]
-          }}
+          initialValues={getFormInitialValues()}
+          enableReinitialize={true}
           validationSchema={validationSchema}
           onSubmit={async (values) => {
             try {
@@ -179,14 +207,24 @@ const NewInvoice = () => {
                 sale_status: 'Confirm', items: values.items, scenario_type: values.fbrScenario
               };
 
-              const { error: invoiceError } = await supabase.from('sales_invoices').insert([databasePayload]);
-              if (invoiceError) throw invoiceError;
+              if (editData && editData.id) {
+                const { error: invoiceUpdateError } = await supabase
+                  .from('sales_invoices')
+                  .update(databasePayload)
+                  .eq('id', editData.id);
 
-              for (const item of values.items) {
-                const { data: p } = await supabase.from('warehouse_inventory').select('id, quantity').eq('product_name', item.itemName).eq('warehouse_name', values.dispatchWarehouse).maybeSingle();
-                if (p) await supabase.from('warehouse_inventory').update({ quantity: Number(p.quantity) - Number(item.qty) }).eq('id', p.id);
+                if (invoiceUpdateError) throw invoiceUpdateError;
+                toast.success('Sales Invoice changes compiled successfully!');
+              } else {
+                const { error: invoiceError } = await supabase.from('sales_invoices').insert([databasePayload]);
+                if (invoiceError) throw invoiceError;
+
+                for (const item of values.items) {
+                  const { data: p } = await supabase.from('warehouse_inventory').select('id, quantity').eq('product_name', item.itemName).eq('warehouse_name', values.dispatchWarehouse).maybeSingle();
+                  if (p) await supabase.from('warehouse_inventory').update({ quantity: Number(p.quantity) - Number(item.qty) }).eq('id', p.id);
+                }
+                toast.success('Sales Invoice logged successfully!');
               }
-              toast.success('Sales Invoice logged successfully!');
               navigate('/sales/invoice/list');
             } catch (err: any) { toast.error('Submission failure: ' + err.message); } finally { setLoading(false); }
           }}
@@ -248,6 +286,7 @@ const NewInvoice = () => {
                     </select>
                     {hasAttempted && errors.dispatchWarehouse && <p className="text-red-500 text-[10px] font-bold mt-1">Required Field</p>}
                   </div>
+
                   <div className="md:col-span-2">
                     <label className="block font-bold text-primary mb-1">FBR Pakistan Statutory Transaction Scenario: *</label>
                     <select name="fbrScenario" value={values.fbrScenario} onChange={handleChange} className="w-full rounded border border-primary p-2 text-sm bg-white dark:bg-boxdark font-black text-primary outline-none">
@@ -333,7 +372,7 @@ const NewInvoice = () => {
                     )}
                   </FieldArray>
                 </div>
-                <div className="flex flex-col md:flex-row justify-between items-start gap-6 border border-stroke dark:border-strokedark p-4 rounded-sm bg-slate-50/10 mt-6">
+                <div className="flex flex-col md:flex-row justify-between items-start gap-6 border border-stroke p-4 rounded-sm bg-slate-50/10 mt-6">
                   <div className="w-full md:w-1/2 grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div>
                       <span className="font-bold text-gray-500 block mb-1">Counter Cash-Box Settlement Mode: *</span>
@@ -364,7 +403,9 @@ const NewInvoice = () => {
 
                 <div className="pt-4 border-t border-stroke dark:border-strokedark flex justify-between items-center bg-gray-50 dark:bg-meta-4/5 p-4 rounded-sm mt-6">
                   <button type="button" onClick={() => navigate('/sales/invoice/list')} className="rounded border border-stroke py-2 px-10 font-semibold text-black dark:text-white hover:bg-gray-100 transition cursor-pointer">Cancel</button>
-                  <button type="submit" disabled={loading} className="bg-success text-white py-2 px-12 rounded font-black text-sm hover:bg-opacity-90 transition shadow-sm cursor-pointer">Log Invoice</button>
+                  <button type="submit" disabled={loading} className="bg-success text-white py-2 px-12 rounded font-black text-sm hover:bg-opacity-90 transition shadow-sm cursor-pointer">
+                    {loading ? 'Saving Changes...' : editData ? 'Apply Updates' : 'Log Invoice'}
+                  </button>
                 </div>
               </Form>
             );

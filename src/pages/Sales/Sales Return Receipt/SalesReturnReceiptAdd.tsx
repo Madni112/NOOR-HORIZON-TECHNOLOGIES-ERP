@@ -44,9 +44,15 @@ const SaleReturnReceiptAdd = () => {
             try {
                 setInitialLoading(true);
 
+                // 1. Fetch raw returns data from your database table
                 const { data: returnsData } = await supabase
                     .from('sales_returns')
-                    .select('id, original_invoice_no, customer_name, total_amount, payout_amount_paid, return_status');
+                    .select('id, original_invoice_no, customer_name, total_amount, total_net_amount, payout_amount_paid, return_status');
+
+                // 2. Fetch all existing receipts to dynamically aggregate them on the fly
+                const { data: allReceiptsData } = await supabase
+                    .from('sales_return_receipts')
+                    .select('sales_return_id, amount_paid');
 
                 const { data: bankAccounts } = await supabase
                     .from('banks')
@@ -55,21 +61,44 @@ const SaleReturnReceiptAdd = () => {
                 if (bankAccounts) setBanksList(bankAccounts);
 
                 if (returnsData) {
-                    const eligibleReturns = returnsData.filter(r =>
-                        r.return_status === 'On Credit' || (isEditMode && String(r.id) === String(routeReceiptRow.sales_return_id))
+                    // Map through returns and dynamically aggregate their associated receipts sum
+                    const compiledReturnsPool = returnsData.map(r => {
+                        const associatedReceipts = (allReceiptsData || []).filter(rec => String(rec.sales_return_id) === String(r.id));
+                        const totalReceiptsSum = associatedReceipts.reduce((sum, rec) => sum + Number(rec.amount_paid || 0), 0);
+
+                        // ✅ THE CRITICAL CALCULATION CURE: True total paid = original return cash + all receipts logged after it
+                        const trueTotalAccumulatedPaid = Number(r.payout_amount_paid || 0) + totalReceiptsSum;
+                        const trueNetItemsReturnVal = Number(r.total_net_amount || r.total_amount || 0);
+                        const dynamicRemainingOwed = Math.max(0, trueNetItemsReturnVal - trueTotalAccumulatedPaid);
+
+                        return {
+                            ...r,
+                            computed_total_paid: trueTotalAccumulatedPaid,
+                            computed_remaining_due: dynamicRemainingOwed,
+                            // If remaining balance drops to 0, treat it as fully paid dynamically
+                            is_fully_settled: dynamicRemainingOwed <= 0
+                        };
+                    });
+
+                    // Only show rows that still have a remaining balance owed
+                    const eligibleReturns = compiledReturnsPool.filter(r =>
+                        !r.is_fully_settled || (isEditMode && String(r.id) === String(routeReceiptRow.sales_return_id))
                     );
+
                     setOnCreditReturns(eligibleReturns);
                     setFilteredReturns(eligibleReturns.slice(0, 3));
 
                     if (isEditMode && routeReceiptRow) {
-                        const currentActiveReturn = returnsData.find(r => String(r.id) === String(routeReceiptRow.sales_return_id));
+                        const currentActiveReturn = compiledReturnsPool.find(r => String(r.id) === String(routeReceiptRow.sales_return_id));
                         if (currentActiveReturn) {
-                            const isolatedPaidPool = Math.max(0, Number(currentActiveReturn.payout_amount_paid || 0) - Number(routeReceiptRow.amount_paid || 0));
-                            const isolatedRemainingDue = Math.max(0, Number(currentActiveReturn.total_amount || 0) - isolatedPaidPool);
+                            // Back out the current receipt value during edits to calculate the true baseline
+                            const isolatedPaidPool = Math.max(0, Number(currentActiveReturn.computed_total_paid) - Number(routeReceiptRow.amount_paid || 0));
+                            const trueNetItemsReturnVal = Number(currentActiveReturn.total_net_amount || currentActiveReturn.total_amount || 0);
+                            const isolatedRemainingDue = Math.max(0, trueNetItemsReturnVal - isolatedPaidPool);
 
                             setSearchQuery(`${routeReceiptRow.original_invoice_no} (${routeReceiptRow.customer_name})`);
                             setSelectedReturnDetails({
-                                totalAmount: currentActiveReturn.total_amount,
+                                totalAmount: trueNetItemsReturnVal,
                                 alreadyPaid: isolatedPaidPool,
                                 remainingDue: isolatedRemainingDue
                             });
@@ -95,6 +124,8 @@ const SaleReturnReceiptAdd = () => {
         };
         fetchVoucherMetadata();
     }, [routeReceiptRow, isEditMode]);
+
+
     useEffect(() => {
         const handleOutsideClick = (e: MouseEvent) => {
             if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
@@ -104,7 +135,6 @@ const SaleReturnReceiptAdd = () => {
         document.addEventListener('mousedown', handleOutsideClick);
         return () => document.removeEventListener('mousedown', handleOutsideClick);
     }, []);
-
     useEffect(() => {
         if (isEditMode) return;
         const term = searchQuery.trim().toLowerCase();
@@ -133,13 +163,13 @@ const SaleReturnReceiptAdd = () => {
             .typeError('Must be a number')
             .required('Required')
             .min(1, 'Min 1')
-            .max(Yup.ref('remainingBalanceMax'), 'Exceeds balance total!')
     });
 
     const blockInvalidChar = (e: React.KeyboardEvent<HTMLInputElement>) =>
         ['-', 'e', 'E', '+'].includes(e.key) && e.preventDefault();
 
     if (initialLoading) return <div className="flex h-48 items-center justify-center"><Spinner /></div>;
+
     return (
         <div className="mx-auto max-w-7xl flex flex-col gap-6 text-black dark:text-white text-xs">
             <div className="rounded-sm border border-stroke bg-white shadow-default dark:border-strokedark dark:bg-boxdark">
@@ -159,6 +189,7 @@ const SaleReturnReceiptAdd = () => {
                             setLoading(true);
 
                             if (isEditMode) {
+                                // ✅ ISOLATED UPDATE: Modifies ONLY the receipt log entry row. Zero interaction with sales_returns columns!
                                 const { error: updateReceiptError } = await supabase
                                     .from('sales_return_receipts')
                                     .update({
@@ -170,21 +201,9 @@ const SaleReturnReceiptAdd = () => {
                                     .eq('id', routeReceiptRow.id);
 
                                 if (updateReceiptError) throw updateReceiptError;
-
-                                const absoluteNewTotalPaidBackSum = Number(selectedReturnDetails.alreadyPaid) + Number(values.amountPaid);
-                                const isCompletelySettledNow = absoluteNewTotalPaidBackSum >= Number(selectedReturnDetails.totalAmount);
-
-                                const { error: updateReturnError } = await supabase
-                                    .from('sales_returns')
-                                    .update({
-                                        payout_amount_paid: absoluteNewTotalPaidBackSum,
-                                        return_status: isCompletelySettledNow ? 'Paid' : 'On Credit'
-                                    })
-                                    .eq('id', values.returnRowId);
-
-                                if (updateReturnError) throw updateReturnError;
                                 toast.success('Collection receipt modification authorized!');
                             } else {
+                                // ✅ ISOLATED INSERT: Creates a new receipt log entry row. Zero interaction with sales_returns columns!
                                 const { error: insertError } = await supabase.from('sales_return_receipts').insert([{
                                     processing_date: values.processingDate,
                                     sales_return_id: values.returnRowId,
@@ -195,19 +214,6 @@ const SaleReturnReceiptAdd = () => {
                                     amount_paid: Number(values.amountPaid)
                                 }]);
                                 if (insertError) throw insertError;
-
-                                const absoluteNewTotalPaidBackSum = Number(selectedReturnDetails.alreadyPaid) + Number(values.amountPaid);
-                                const isCompletelySettledNow = absoluteNewTotalPaidBackSum >= Number(selectedReturnDetails.totalAmount);
-
-                                const { error: updateError } = await supabase
-                                    .from('sales_returns')
-                                    .update({
-                                        payout_amount_paid: absoluteNewTotalPaidBackSum,
-                                        return_status: isCompletelySettledNow ? 'Paid' : 'On Credit'
-                                    })
-                                    .eq('id', values.returnRowId);
-
-                                if (updateError) throw updateError;
                                 toast.success('Cash-back collection voucher approved!');
                             }
                             navigate('/sales/sales-return-receipt/list');
@@ -247,40 +253,42 @@ const SaleReturnReceiptAdd = () => {
                                             {filteredReturns.length === 0 ? (
                                                 <div className="p-3 text-center text-xs text-gray-400 font-medium italic">No pending return options profiles.</div>
                                             ) : (
-                                                filteredReturns.map(r => {
-                                                    // --- ✅ CORE BALANCE COMPUTATION MATH TUNING ---
-                                                    const remDue = Math.max(0, Number(r.total_amount || 0) - Number(r.payout_amount_paid || 0));
-                                                    return (
-                                                        <div
-                                                            key={r.id}
-                                                            onClick={() => {
-                                                                setFieldValue('returnRowId', r.id);
-                                                                setFieldValue('invoiceNoRef', r.original_invoice_no);
-                                                                setFieldValue('customerName', r.customer_name);
-                                                                setFieldValue('remainingBalanceMax', remDue);
-                                                                setSearchQuery(`${r.original_invoice_no} (${r.customer_name})`);
-                                                                setSelectedReturnDetails({
-                                                                    totalAmount: Number(r.total_amount || 0),
-                                                                    alreadyPaid: Number(r.payout_amount_paid || 0),
-                                                                    remainingDue: remDue
-                                                                });
-                                                                setIsDropdownOpen(false);
-                                                            }}
-                                                            className="p-2.5 hover:bg-slate-100 dark:hover:bg-meta-4 cursor-pointer text-xs font-bold border-b border-stroke text-black dark:text-white"
-                                                        >
-                                                            📄 {r.original_invoice_no} - {r.customer_name} (Remaining Bal: Rs. {remDue.toLocaleString()})
-                                                        </div>
-                                                    );
-                                                })
+                                                filteredReturns.map(r => (
+                                                    <div
+                                                        key={r.id}
+                                                        onClick={() => {
+                                                            setFieldValue('returnRowId', r.id);
+                                                            setFieldValue('invoiceNoRef', r.original_invoice_no);
+                                                            setFieldValue('customerName', r.customer_name);
+                                                            setFieldValue('remainingBalanceMax', r.computed_remaining_due);
+                                                            setSearchQuery(`${r.original_invoice_no} (${r.customer_name})`);
+
+                                                            // ✅ FIXED: Now reads the live computed remaining totals safely (e.g. drops from 40k to 30k instantly)
+                                                            setSelectedReturnDetails({
+                                                                totalAmount: Number(r.total_net_amount || r.total_amount || 0),
+                                                                alreadyPaid: Number(r.computed_total_paid),
+                                                                remainingDue: Number(r.computed_remaining_due)
+                                                            });
+                                                            setIsDropdownOpen(false);
+                                                        }}
+                                                        className="p-2.5 hover:bg-slate-100 dark:hover:bg-meta-4 cursor-pointer text-xs font-bold border-b border-stroke text-black dark:text-white"
+                                                    >
+                                                        📄 {r.original_invoice_no} - {r.customer_name} (Remaining Bal: Rs. {Number(r.computed_remaining_due).toLocaleString()})
+                                                    </div>
+                                                ))
                                             )}
                                         </div>
                                     )}
+
                                 </div>
                                 <div>
                                     <label className="block font-bold text-gray-500 mb-1">Customer / Account Title:</label>
                                     <input type="text" name="customerName" disabled value={values.customerName} className="w-full rounded border border-stroke p-2 text-sm bg-gray-100 dark:bg-meta-4/20 text-gray-500 font-bold outline-none cursor-not-allowed" placeholder="Customer reference..." />
                                 </div>
-
+                                <div>
+                                    <label className="block font-bold text-gray-500 mb-1">Invoice Reference No:</label>
+                                    <input type="text" name="invoiceNoRef" disabled value={values.invoiceNoRef} className="w-full rounded border border-stroke p-2 text-sm bg-gray-100 dark:bg-meta-4/20 text-gray-500 font-bold outline-none cursor-not-allowed" placeholder="Invoice trace..." />
+                                </div>
                                 <div>
                                     <label className="block font-bold text-gray-500 mb-1">Settlement Mode Selector: *</label>
                                     <select name="settlementMode" value={values.settlementMode} onChange={handleChange} className="w-full border border-stroke dark:border-strokedark rounded p-2 bg-white dark:bg-boxdark outline-none font-black text-xs text-black dark:text-white focus:border-primary">
@@ -299,7 +307,7 @@ const SaleReturnReceiptAdd = () => {
                                     </div>
                                 )}
 
-                                <div className={values.settlementMode === 'Bank' ? 'md:col-span-2' : 'md:col-span-2'}>
+                                <div className="md:col-span-2">
                                     <label className="block font-bold text-danger mb-1">Remitted Cash Back Amount Paid (PKR): *</label>
                                     <input type="number" name="amountPaid" value={values.amountPaid} onKeyDown={blockInvalidChar} onChange={handleChange} placeholder="Type payment..." className={`w-full rounded border p-2 bg-transparent text-right font-black text-danger text-sm focus:border-primary outline-none text-black dark:text-white ${hasAttempted && errors.amountPaid ? 'border-red-500 bg-red-50' : 'border-stroke'}`} />
                                     {hasAttempted && errors.amountPaid && <p className="text-red-500 font-bold text-[10px] mt-1">⚠️ {String(errors.amountPaid)}</p>}
@@ -307,7 +315,6 @@ const SaleReturnReceiptAdd = () => {
 
                                 {values.returnRowId && (
                                     <div className="md:col-span-4 bg-gray-50 dark:bg-meta-4/20 p-3 rounded border border-stroke dark:border-strokedark font-mono text-[11px] grid grid-cols-3 text-center text-gray-500 dark:text-white">
-                                        {/* --- ✅ TUNED BALANCE LOGIC: NOW SHOWING TRUE TAX-INCLUSIVE BALANCES --- */}
                                         <div>Total Return Value: <b className="block text-xs text-black dark:text-white">Rs. {Number(selectedReturnDetails.totalAmount).toLocaleString()}</b></div>
                                         <div>Already Refunded: <b className="block text-xs text-success">Rs. {Number(selectedReturnDetails.alreadyPaid).toLocaleString()}</b></div>
                                         <div>
@@ -330,6 +337,6 @@ const SaleReturnReceiptAdd = () => {
             </div>
         </div>
     );
-};  
+};
 
 export default SaleReturnReceiptAdd;
