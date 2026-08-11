@@ -11,7 +11,7 @@ export interface FBRItemPayload {
   fixedNotifiedValueOrRetailPrice: number;
   salesTaxApplicable: number;
   salesTaxWithheldAtSource: number;
-  extraTax: number;
+  extraTax: number | string;
   furtherTax: number;
   sroScheduleNo: string;
   fedPayable: number;
