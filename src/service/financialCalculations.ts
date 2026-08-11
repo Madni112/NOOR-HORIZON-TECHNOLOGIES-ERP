@@ -59,7 +59,7 @@ export const fetchFinancialMetrics = async (): Promise<FinancialSummary> => {
     const currentYear = new Date().getFullYear();
     const currentMonth = new Date().getMonth();
 
-    // --- 2. Calculate Today's & Monthly Sales & Purchases ---
+    // --- 2. Calculate Today's & Monthly Net Sales & Purchases ---
     let todaysSales = 0;
     let thisMonthSales = 0;
 
@@ -79,6 +79,26 @@ export const fetchFinancialMetrics = async (): Promise<FinancialSummary> => {
       }
     });
 
+    // Deduct Sales Returns from Net Sales Metrics
+    salesReturnsList.forEach((ret: any) => {
+      const retAmt = Number(ret.total_amount || ret.total_net_amount || 0);
+      const retDateStr = String(ret.created_at || ret.return_date || '').split('T')[0];
+
+      if (retDateStr === todayStr) {
+        todaysSales -= retAmt;
+      }
+
+      if (retDateStr) {
+        const d = new Date(retDateStr);
+        if (d.getFullYear() === currentYear && d.getMonth() === currentMonth) {
+          thisMonthSales -= retAmt;
+        }
+      }
+    });
+
+    todaysSales = Math.max(0, todaysSales);
+    thisMonthSales = Math.max(0, thisMonthSales);
+
     let thisMonthPurchases = 0;
     purchasesList.forEach((pur: any) => {
       const purAmt = Number(pur.total_amount || 0);
@@ -90,6 +110,19 @@ export const fetchFinancialMetrics = async (): Promise<FinancialSummary> => {
         }
       }
     });
+
+    // Deduct Purchase Returns from Net Monthly Purchases
+    purchaseReturnsList.forEach((pret: any) => {
+      const pretAmt = Number(pret.total_amount || pret.total_net_amount || 0);
+      const pretDateStr = String(pret.created_at || pret.return_date || '').split('T')[0];
+      if (pretDateStr) {
+        const d = new Date(pretDateStr);
+        if (d.getFullYear() === currentYear && d.getMonth() === currentMonth) {
+          thisMonthPurchases -= pretAmt;
+        }
+      }
+    });
+    thisMonthPurchases = Math.max(0, thisMonthPurchases);
 
     // --- 3. Calculate Cash Balance (App Cash Drawer Liquidity) ---
     let cashInflow = 0;
@@ -226,19 +259,47 @@ export const fetchFinancialMetrics = async (): Promise<FinancialSummary> => {
 
     const totalBankBalance = bankAccountsList.reduce((acc, b) => acc + b.netBalance, 0);
 
-    // --- 5. Receivables, Payables, Inventory Asset Value ---
+    // --- 5. True Net Receivables, Payables, Inventory Asset Value ---
     let totalReceivables = 0;
     invoicesList.forEach((inv: any) => {
+      const invIdStr = String(inv.id).trim().toLowerCase();
       const tot = Number(inv.total_amount || 0);
-      const paid = Number(inv.cash_amount_paid || inv.amount_paid || 0);
-      if (tot > paid) totalReceivables += (tot - paid);
+      const initialPaid = Number(inv.cash_amount_paid || inv.amount_paid || 0);
+
+      // Sum returns for this specific invoice
+      const matchedReturns = salesReturnsList.filter((r: any) => {
+        const cleanRef = String(r.original_invoice_no || '').replace('INV-', '').trim().toLowerCase();
+        return cleanRef === invIdStr;
+      });
+      const returnsSum = matchedReturns.reduce((sum: number, r: any) => sum + Number(r.total_amount || r.total_net_amount || 0), 0);
+
+      // Sum vouchers for this specific invoice
+      const matchedVouchers = vouchersList.filter((v: any) => {
+        const cleanRef = String(v.original_invoice_no || '').replace('INV-', '').trim().toLowerCase();
+        const isReceipt = String(v.voucher_type || '').toLowerCase().includes('receipt');
+        return isReceipt && cleanRef === invIdStr;
+      });
+      const vouchersSum = matchedVouchers.reduce((sum: number, v: any) => sum + Number(v.total_amount || 0), 0);
+
+      const netDue = Math.max(0, tot - initialPaid - vouchersSum - returnsSum);
+      totalReceivables += netDue;
     });
 
     let totalPayables = 0;
     purchasesList.forEach((pur: any) => {
+      const purIdStr = String(pur.id).trim().toLowerCase();
       const tot = Number(pur.total_amount || 0);
-      const paid = Number(pur.amount_paid_now || pur.paid_amount || 0);
-      if (tot > paid) totalPayables += (tot - paid);
+      const initialPaid = Number(pur.amount_paid_now || pur.paid_amount || 0);
+
+      // Sum purchase returns for this specific purchase
+      const matchedPReturns = purchaseReturnsList.filter((pr: any) => {
+        const cleanRef = String(pr.purchase_no || pr.original_purchase_no || '').replace('PUR-', '').trim().toLowerCase();
+        return cleanRef === purIdStr;
+      });
+      const pReturnsSum = matchedPReturns.reduce((sum: number, pr: any) => sum + Number(pr.total_amount || 0), 0);
+
+      const netPayableDue = Math.max(0, tot - initialPaid - pReturnsSum);
+      totalPayables += netPayableDue;
     });
 
     let inventoryAssetValue = 0;
@@ -284,6 +345,17 @@ export const fetchFinancialMetrics = async (): Promise<FinancialSummary> => {
       }
     });
 
+    // Deduct Sales Returns from Monthly Trend
+    salesReturnsList.forEach((ret: any) => {
+      const d = new Date(ret.created_at || ret.return_date);
+      if (!isNaN(d.getTime())) {
+        const key = `${monthsName[d.getMonth()]} ${d.getFullYear()}`;
+        if (monthlySalesTrendMap[key]) {
+          monthlySalesTrendMap[key].sales = Math.max(0, monthlySalesTrendMap[key].sales - Number(ret.total_amount || ret.total_net_amount || 0));
+        }
+      }
+    });
+
     purchasesList.forEach((pur: any) => {
       const d = new Date(pur.created_at || pur.purchase_date);
       if (!isNaN(d.getTime())) {
@@ -293,6 +365,17 @@ export const fetchFinancialMetrics = async (): Promise<FinancialSummary> => {
         }
         if (cashFlowTrendMap[key]) {
           cashFlowTrendMap[key].outflow += Number(pur.amount_paid_now || pur.total_amount || 0);
+        }
+      }
+    });
+
+    // Deduct Purchase Returns from Monthly Trend
+    purchaseReturnsList.forEach((pret: any) => {
+      const d = new Date(pret.created_at || pret.return_date);
+      if (!isNaN(d.getTime())) {
+        const key = `${monthsName[d.getMonth()]} ${d.getFullYear()}`;
+        if (monthlySalesTrendMap[key]) {
+          monthlySalesTrendMap[key].purchases = Math.max(0, monthlySalesTrendMap[key].purchases - Number(pret.total_amount || pret.total_net_amount || 0));
         }
       }
     });
