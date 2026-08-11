@@ -82,8 +82,7 @@ const SalesReturnList = () => {
         .from('sales_returns')
         .update({
           fbr_fiscal_number: fbrRes.fbrFiscalNumber,
-          fbr_qr_code: fbrRes.fbrQrCode,
-          fbr_status: 'Posted'
+          fbr_qr_code: fbrRes.fbrQrCode
         })
         .eq('id', returnRecord.id);
 

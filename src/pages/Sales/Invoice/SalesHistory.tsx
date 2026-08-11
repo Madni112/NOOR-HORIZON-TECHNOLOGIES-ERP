@@ -76,8 +76,7 @@ const SalesHistory = () => {
         .from('sales_invoices')
         .update({
           fbr_fiscal_number: fbrRes.fbrFiscalNumber,
-          fbr_qr_code: fbrRes.fbrQrCode,
-          fbr_status: 'Posted'
+          fbr_qr_code: fbrRes.fbrQrCode
         })
         .eq('id', invoice.id);
 
