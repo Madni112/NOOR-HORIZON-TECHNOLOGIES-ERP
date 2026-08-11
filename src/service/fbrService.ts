@@ -164,7 +164,7 @@ export const syncWithFBR = async (payload: FBRInvoicePayload, isSandbox: boolean
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': 'Bearer 90e4e727-d927-3a9b-b894-101f92b47f32' // PRAL ESP Token
+        'Authorization': 'Bearer 3abdd5c9-08cb-3f81-9a8b-331e9282f911' // FBR Iris Sandbox Security Token
       },
       body: JSON.stringify(payload)
     });
