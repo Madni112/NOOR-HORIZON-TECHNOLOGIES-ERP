@@ -5,6 +5,7 @@ import { toast } from 'react-hot-toast';
 import Spinner from '../../../ui/Spinner';
 import { MdDelete, MdEdit, MdPrint } from 'react-icons/md';
 import { FiSend } from 'react-icons/fi';
+import { buildFBRReturnPayload, syncWithFBR } from '../../../service/fbrService';
 
 const SalesReturnList = () => {
   const navigate = useNavigate();
@@ -70,10 +71,20 @@ const SalesReturnList = () => {
   const handleSyncReturn = async (returnRecord: any) => {
     setSyncingId(returnRecord.id);
     try {
-      const fakeFiscalNumber = `FBR-RET-${Math.floor(100000 + Math.random() * 900000)}`;
+      const fbrPayload = buildFBRReturnPayload(returnRecord);
+      const fbrRes = await syncWithFBR(fbrPayload, true);
+
+      if (!fbrRes || !fbrRes.fbrFiscalNumber) {
+        throw new Error('FBR validation rejected the return payload');
+      }
+
       const { error } = await supabase
         .from('sales_returns')
-        .update({ fbr_fiscal_number: fakeFiscalNumber, fbr_qr_code: "fbr.gov.pk" })
+        .update({
+          fbr_fiscal_number: fbrRes.fbrFiscalNumber,
+          fbr_qr_code: fbrRes.fbrQrCode,
+          fbr_status: 'Posted'
+        })
         .eq('id', returnRecord.id);
 
       if (error) {
@@ -83,7 +94,7 @@ const SalesReturnList = () => {
         }
         throw error;
       }
-      toast.success('Sales Return Posted to FBR Successfully!');
+      toast.success(`Sales Return Posted to FBR! Code: ${fbrRes.fbrFiscalNumber}`);
       fetchSalesReturns();
     } catch (err: any) {
       toast.error('FBR Sync Error: ' + err.message);

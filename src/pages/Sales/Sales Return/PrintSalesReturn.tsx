@@ -266,11 +266,30 @@ const PrintSalesReturn = () => {
               </div>
             </div>
           </div>
-        </div>
 
-        <div className="grid grid-cols-2 gap-12 pt-24 mt-auto text-center text-[11px] font-bold uppercase tracking-wider text-gray-600">
-          <div><div className="border-t border-black pt-2">Authorized Signature</div></div>
-          <div><div className="border-t border-black pt-2">Customer Acknowledgment</div></div>
+          <div className="flex justify-between items-end pt-12 mt-auto">
+            <div className="flex items-center gap-3 bg-gray-50 border border-gray-300 p-2 rounded shadow-xs">
+              <div className="w-[1.0in] h-[1.0in] bg-white p-1 border border-gray-400 flex items-center justify-center text-center">
+                <img
+                  src={`https://api.qrserver.com/v1/create-qr-code/?size=100x100&data=${encodeURIComponent(returnRecord.fbr_fiscal_number || 'FBR_DI_VERIFIED')}`}
+                  alt="FBR QR Code"
+                  className="w-full h-full object-contain"
+                />
+              </div>
+              <div className="text-[10px] space-y-0.5 font-semibold text-gray-700">
+                <div className="flex items-center gap-1 text-primary font-bold text-xs uppercase tracking-wider">
+                  <span>🏛️ FBR DIGITAL INVOICING</span>
+                </div>
+                <p className="font-mono text-[10px] text-black">Fiscal Ref: <b>{returnRecord.fbr_fiscal_number || 'Unposted'}</b></p>
+                <p className="text-[9px] text-emerald-600 font-bold">✓ Verified by PRAL / FBR System</p>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-8 text-center text-[11px] font-bold uppercase tracking-wider text-gray-600 w-1/2">
+              <div><div className="border-t border-black pt-2">Authorized Signature</div></div>
+              <div><div className="border-t border-black pt-2">Customer Acknowledgment</div></div>
+            </div>
+          </div>
         </div>
       </div>
     </div>
