@@ -83,8 +83,8 @@ const AddOpeningStock = () => {
                     const { data: locStock } = await supabase
                         .from('warehouse_inventory')
                         .select('id, quantity')
-                        .eq('product_name', values.itemName)
-                        .eq('warehouse_name', values.location)
+                        .ilike('product_name', values.itemName)
+                        .ilike('warehouse_name', values.location)
                         .maybeSingle();
 
                     if (locStock) {
@@ -125,8 +125,8 @@ const AddOpeningStock = () => {
                 const { data: locStock } = await supabase
                     .from('warehouse_inventory')
                     .select('id, quantity')
-                    .eq('product_name', values.itemName)
-                    .eq('warehouse_name', values.location)
+                    .ilike('product_name', values.itemName)
+                    .ilike('warehouse_name', values.location)
                     .maybeSingle();
 
                 if (locStock) {

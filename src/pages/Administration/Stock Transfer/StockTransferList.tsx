@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { supabase } from '../../../Context/supabaseClient';
 import { toast } from 'react-hot-toast';
 import Spinner from '../../../ui/Spinner';
-import { MdEdit, MdCompareArrows } from 'react-icons/md';
+import { MdEdit, MdDelete, MdCompareArrows } from 'react-icons/md';
 
 const StockTransferList = () => {
   const navigate = useNavigate();
@@ -32,6 +32,77 @@ const StockTransferList = () => {
       toast.error('Failed to aggregate stock transfers: ' + err.message);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleDeleteTransferRecord = async (id: string | number) => {
+    if (!window.confirm('Are you certain you want to permanently delete this stock transfer record? Allocated location stock balances will reverse!')) return;
+
+    try {
+      const { data: targetRecord, error: fetchError } = await supabase
+        .from('stock_transfers')
+        .select('*')
+        .eq('id', id)
+        .single();
+
+      if (fetchError) throw fetchError;
+
+      if (targetRecord && targetRecord.items) {
+        const itemsArr = Array.isArray(targetRecord.items) ? targetRecord.items : JSON.parse(targetRecord.items || '[]');
+        const fromLoc = targetRecord.from_location;
+        const toLoc = targetRecord.to_location;
+
+        for (const item of itemsArr) {
+          const qty = Number(item.qty || item.quantity || 0);
+          const pName = item.itemName || item.product_name;
+
+          if (pName && qty > 0) {
+            // 1. Revert Destination Warehouse (TO) -> DECREASE (-)
+            if (toLoc) {
+              const { data: destStock } = await supabase
+                .from('warehouse_inventory')
+                .select('id, quantity')
+                .ilike('product_name', pName)
+                .ilike('warehouse_name', toLoc)
+                .maybeSingle();
+
+              if (destStock) {
+                const newDestStock = Math.max(0, (Number(destStock.quantity) || 0) - qty);
+                await supabase.from('warehouse_inventory').update({ quantity: newDestStock }).eq('id', destStock.id);
+              }
+            }
+
+            // 2. Revert Source Warehouse (FROM) -> INCREASE (+)
+            if (fromLoc) {
+              const { data: sourceStock } = await supabase
+                .from('warehouse_inventory')
+                .select('id, quantity')
+                .ilike('product_name', pName)
+                .ilike('warehouse_name', fromLoc)
+                .maybeSingle();
+
+              if (sourceStock) {
+                const newSourceStock = (Number(sourceStock.quantity) || 0) + qty;
+                await supabase.from('warehouse_inventory').update({ quantity: newSourceStock }).eq('id', sourceStock.id);
+              } else {
+                await supabase.from('warehouse_inventory').insert([{
+                  product_name: pName,
+                  warehouse_name: fromLoc,
+                  quantity: qty
+                }]);
+              }
+            }
+          }
+        }
+      }
+
+      const { error: deleteError } = await supabase.from('stock_transfers').delete().eq('id', id);
+      if (deleteError) throw deleteError;
+
+      toast.success('Stock transfer record deleted cleanly. Location stock levels reversed!');
+      fetchTransferHistory();
+    } catch (err: any) {
+      toast.error('Deletion Failure: ' + err.message);
     }
   };
 
@@ -119,7 +190,7 @@ const StockTransferList = () => {
                           {item.status}
                         </span>
                       </td>
-                      <td className="py-3.5 px-4 text-center">
+                      <td className="py-3.5 px-4 text-center flex items-center justify-center gap-2">
                         <button 
                           type="button" 
                           onClick={() => navigate('/Administration/StockTransfer/Add', { state: { transfer: item } })}
@@ -127,6 +198,14 @@ const StockTransferList = () => {
                           title="View or Modify Transfer"
                         >
                           <MdEdit size={18} />
+                        </button>
+                        <button 
+                          type="button" 
+                          onClick={() => handleDeleteTransferRecord(item.id)}
+                          className="text-gray-500 hover:text-danger transition p-0.5"
+                          title="Delete Stock Transfer"
+                        >
+                          <MdDelete size={18} />
                         </button>
                       </td>
                     </tr>

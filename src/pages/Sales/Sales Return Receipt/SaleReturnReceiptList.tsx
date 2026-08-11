@@ -49,7 +49,7 @@ const SaleReturnReceiptList = () => {
             if (deleteError) throw deleteError;
 
             toast.success('Sales return receipt removed cleanly. Parent invoice preserved!');
-            fetchReceiptsListRows(); // Refreshes your active log grid
+            fetchReceiptsLog(); // Refreshes your active log grid
         } catch (err: any) {
             toast.error('Deletion Interrupted: ' + err.message);
         } finally {
@@ -163,7 +163,7 @@ const SaleReturnReceiptList = () => {
                                                     </button>
                                                     <button
                                                         type="button"
-                                                        onClick={() => handleDeleteReceipt(rec)}
+                                                        onClick={() => handleDeleteReceipt(rec.id)}
                                                         className="text-gray-400 hover:text-danger transition cursor-pointer p-0.5"
                                                         title="Delete Receipt"
                                                     >

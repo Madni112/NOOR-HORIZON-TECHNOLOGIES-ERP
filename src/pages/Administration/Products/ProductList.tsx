@@ -67,9 +67,7 @@ const ProductList = () => {
           let totalSold = 0;
           (sales || []).forEach((s: any) => {
             const statusClean = String(s.sale_status || '').trim().toLowerCase();
-            const receiptClean = String(s.receipt_status || '').trim().toLowerCase();
-
-            if (statusClean !== 'cancel' && statusClean !== 'deleted' && receiptClean !== 'unposted') {
+            if (statusClean !== 'cancel' && statusClean !== 'deleted') {
               const itemsArray = Array.isArray(s.items) ? s.items : JSON.parse(s.items || '[]');
               itemsArray.forEach((item: any) => {
                 const sName = String(item.product_name || item.itemName || item.item_name || '').trim().toLowerCase();

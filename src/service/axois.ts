@@ -7,7 +7,7 @@ import axios, {
 import { toast } from 'react-hot-toast';
 
 // Define the base URL for your API
-const BASE_URL = 'http://localhost:8080/authen-face-api/';
+const BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8080/authen-face-api/';
 
 // Create an Axios instance
 const axiosInstance: AxiosInstance = axios.create({

@@ -305,7 +305,7 @@ const Sidebar = ({ sidebarOpen, setSidebarOpen }: SidebarProps) => {
           <NavLink className="flex items-center gap-2 w-full" to="/">
             {(sidebarOpen || isMobile) ? (
               <p className="text-xl font-bold text-primary dark:text-white truncate block w-full text-left tracking-tight">
-                Softhub-Pk ERP
+                Softhub-PK ERP
                 <br />
                 Software
               </p>

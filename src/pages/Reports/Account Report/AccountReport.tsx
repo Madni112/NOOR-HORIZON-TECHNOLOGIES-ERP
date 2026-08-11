@@ -60,10 +60,10 @@ const AccountReport = () => {
           .from('chart_of_accounts')
           .select('id, category_code, control_code, account_code, account_title');
 
-        // ✅ SCHEMA COMPLIANT: Fetches exact camelCase database columns from vouchers definitions
+        // ✅ SCHEMA COMPLIANT: Fetches exact database columns from financial_vouchers definitions
         const { data: vch } = await supabase
-          .from('vouchers')
-          .select('id, voucherNo, voucherType');
+          .from('financial_vouchers')
+          .select('id, voucher_no, voucher_type');
 
         if (cust) setCustomers(cust);
         if (vend) setVendors(vend);
@@ -86,8 +86,8 @@ const AccountReport = () => {
         if (vch) {
           const normalizedVouchers = vch.map((v: any) => ({
             id: v.id,
-            voucher_no: v.voucherNo,
-            voucher_type: v.voucherType
+            voucher_no: v.voucher_no || v.voucherNo,
+            voucher_type: v.voucher_type || v.voucherType
           }));
           setVouchers(normalizedVouchers);
         }
@@ -249,6 +249,11 @@ const AccountReport = () => {
               <label className="block font-bold text-gray-500 mb-1">Category Code Selection:</label>
               <select value={filters.categoryCode} onChange={(e) => handleInputChange('categoryCode', e.target.value)} className="w-full border rounded p-2 bg-transparent font-semibold text-xs text-black dark:text-white dark:bg-boxdark">
                 <option value="All">All Category Codes</option>
+                <option value="A-ASSETS">A-ASSETS (Asset Accounts)</option>
+                <option value="LIABILITIES">LIABILITIES (Liability Accounts)</option>
+                <option value="EQUITY">EQUITY (Equity Accounts)</option>
+                <option value="REVENUE">REVENUE (Revenue & Sales)</option>
+                <option value="EXPENSE">EXPENSE (Cost & Expenses)</option>
                 {uniqueCategoryCodes.map((cat, i) => <option key={i} value={cat}>{cat}</option>)}
               </select>
             </div>

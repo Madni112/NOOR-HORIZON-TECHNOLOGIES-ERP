@@ -96,7 +96,7 @@ const PurchaseReportPrint = () => {
         </div>
 
         <div className="text-center space-y-1 py-4 border-b border-double border-black">
-          <h1 className="text-xl font-black uppercase tracking-widest font-serif">AL-SYED SOFTWARE ERP LOGISTICS</h1>
+          <h1 className="text-xl font-black uppercase tracking-widest font-serif">SOFTHUB-PK ERP SOFTWARE</h1>
           <p className="text-[10px] font-bold tracking-wider text-gray-500 uppercase">Master Procurement Accounting Workbook Summary Statement</p>
           <div className="text-[10px] pt-1 font-mono flex justify-between px-2 text-gray-600">
             <span>Procurement Categorization: <b className="text-black uppercase underline">{rType} Ledger Book</b></span>

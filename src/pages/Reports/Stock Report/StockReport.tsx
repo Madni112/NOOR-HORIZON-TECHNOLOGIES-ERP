@@ -7,7 +7,7 @@ import Spinner from '../../../ui/Spinner';
 const StockReport = () => {
   const navigate = useNavigate();
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<1 | 2 | 3 | 4 | 5 | 6 | 7>(1);
+  const [activeTab, setActiveTab] = useState<1 | 2 | 3 | 4 | 5 | 6 | 7 | 8>(1);
 
   const [categories, setCategories] = useState<any[]>([]);
   const [uoms, setUoms] = useState<any[]>([]);
@@ -97,6 +97,7 @@ const StockReport = () => {
         <button type="button" onClick={() => setActiveTab(5)} className={`py-2.5 px-4 transition border-b-2 cursor-pointer ${activeTab === 5 ? 'border-primary text-primary font-black bg-primary/5' : 'border-transparent text-gray-400 hover:text-black'}`}>Detail With Price</button>
         <button type="button" onClick={() => setActiveTab(6)} className={`py-2.5 px-4 transition border-b-2 cursor-pointer ${activeTab === 6 ? 'border-primary text-primary font-black bg-primary/5' : 'border-transparent text-gray-400 hover:text-black'}`}>Product Report</button>
         <button type="button" onClick={() => setActiveTab(7)} className={`py-2.5 px-4 transition border-b-2 cursor-pointer ${activeTab === 7 ? 'border-primary text-primary font-black bg-primary/5' : 'border-transparent text-gray-400 hover:text-black'}`}>Status Detail</button>
+        <button type="button" onClick={() => setActiveTab(8)} className={`py-2.5 px-4 transition border-b-2 cursor-pointer ${activeTab === 8 ? 'border-primary text-primary font-black bg-primary/5' : 'border-transparent text-gray-400 hover:text-black'}`}>Location Stock</button>
       </div>
 
       <div className="rounded-sm border border-stroke bg-white shadow-default dark:border-strokedark dark:bg-boxdark p-6">
@@ -213,7 +214,22 @@ const StockReport = () => {
             </>
           )}
 
-          {activeTab !== 3 && activeTab !== 6 && activeTab !== 7 && (
+          {activeTab === 8 && (
+            <>
+              <div><label className="block font-bold text-gray-500 mb-1">Target Warehouse Location:</label><select value={criteria.location} onChange={(e) => handleInputChange('location', e.target.value)} className="w-full border rounded p-2 bg-transparent font-semibold text-xs text-black dark:text-white dark:bg-boxdark"><option value="All">All Locations</option>{locations.map(l => <option key={l.id} value={l.name}>{l.name}</option>)}</select></div>
+              <div><label className="block font-bold text-gray-500 mb-1">Brand Name:</label><select value={criteria.brand} onChange={(e) => handleInputChange('brand', e.target.value)} className="w-full border rounded p-2 bg-transparent font-semibold text-xs text-black dark:text-white dark:bg-boxdark"><option value="All">All Brands</option>{brands.map(b => <option key={b.id} value={b.name}>{b.name}</option>)}</select></div>
+              <div>
+                <label className="block font-bold text-gray-500 mb-1">Select Product Asset:</label>
+                <select value={criteria.product} onChange={(e) => handleInputChange('product', e.target.value)} className="w-full border rounded p-2 bg-transparent font-semibold text-xs text-black dark:text-white dark:bg-boxdark">
+                  <option value="All">All Products ({getContextualProductSelectionPool().length} Options)</option>
+                  {getContextualProductSelectionPool().map(p => <option key={p.id} value={p.product_name}>{p.product_name}</option>)}
+                </select>
+              </div>
+              <div><label className="block font-bold text-gray-500 mb-1">As Of Date Cutoff:</label><input type="date" value={criteria.asOfDate} onChange={(e) => handleInputChange('asOfDate', e.target.value)} className="w-full border rounded p-2 bg-transparent font-semibold text-xs text-black dark:text-white dark:bg-boxdark outline-none" /></div>
+            </>
+          )}
+
+          {activeTab === 1 && (
             <>
               <div><label className="block font-bold text-gray-500 mb-1">Date Bracket From:</label><input type="date" value={criteria.dateFrom} onChange={(e) => handleInputChange('dateFrom', e.target.value)} className="w-full border border-stroke rounded p-2 bg-transparent font-semibold text-black dark:text-white text-xs outline-none dark:bg-boxdark" /></div>
               <div><label className="block font-bold text-gray-500 mb-1">Date Bracket To:</label><input type="date" value={criteria.dateTo} onChange={(e) => handleInputChange('dateTo', e.target.value)} className="w-full border border-stroke rounded p-2 bg-transparent font-semibold text-black dark:text-white text-xs outline-none dark:bg-boxdark" /></div>

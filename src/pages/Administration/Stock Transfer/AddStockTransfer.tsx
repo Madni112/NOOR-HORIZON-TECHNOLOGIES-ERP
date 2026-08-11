@@ -45,27 +45,24 @@ const AddStockTransfer = () => {
 
     setFieldValue(`items.${index}.itemName`, selectedName);
 
+    if (!sourceWarehouse) {
+      setFieldValue(`items.${index}.availableQty`, 0);
+      return;
+    }
+
     try {
       const { data: stockRecord, error } = await supabase
         .from('warehouse_inventory')
         .select('quantity')
-        .eq('product_name', selectedName)
-        .eq('warehouse_name', sourceWarehouse)
+        .ilike('product_name', selectedName)
+        .ilike('warehouse_name', sourceWarehouse)
         .maybeSingle();
 
       if (error) throw error;
-
-      if (stockRecord) {
-        setFieldValue(`items.${index}.availableQty`, Number(stockRecord.quantity));
-      } else {
-        const localProductMatch = productList.find(p => p.product_name === selectedName);
-        const fallbackGlobalStock = localProductMatch ? Number(localProductMatch.current_stock) : 0;
-        setFieldValue(`items.${index}.availableQty`, fallbackGlobalStock);
-      }
+      setFieldValue(`items.${index}.availableQty`, stockRecord ? Number(stockRecord.quantity) : 0);
     } catch (err: any) {
       console.error(err.message);
-      const localProductMatch = productList.find(p => p.product_name === selectedName);
-      setFieldValue(`items.${index}.availableQty`, localProductMatch ? Number(localProductMatch.current_stock) : 0);
+      setFieldValue(`items.${index}.availableQty`, 0);
     }
   };
 
@@ -161,8 +158,8 @@ const AddStockTransfer = () => {
                   const { data: sourceStock } = await supabase
                     .from('warehouse_inventory')
                     .select('id, quantity')
-                    .eq('product_name', item.itemName)
-                    .eq('warehouse_name', values.fromLocation)
+                    .ilike('product_name', item.itemName)
+                    .ilike('warehouse_name', values.fromLocation)
                     .maybeSingle();
 
                   if (sourceStock) {
@@ -181,8 +178,8 @@ const AddStockTransfer = () => {
                   const { data: destStock } = await supabase
                     .from('warehouse_inventory')
                     .select('id, quantity')
-                    .eq('product_name', item.itemName)
-                    .eq('warehouse_name', values.toLocation)
+                    .ilike('product_name', item.itemName)
+                    .ilike('warehouse_name', values.toLocation)
                     .maybeSingle();
 
                   if (destStock) {
@@ -243,18 +240,17 @@ const AddStockTransfer = () => {
                         for (let idx = 0; idx < values.items.length; idx++) {
                           const rowItem = values.items[idx];
                           if (rowItem.itemName) {
-                            const { data: stockRecord } = await supabase
-                              .from('warehouse_inventory')
-                              .select('quantity')
-                              .eq('product_name', rowItem.itemName)
-                              .eq('warehouse_name', selectedWH)
-                              .maybeSingle();
-
-                            if (stockRecord) {
-                              setFieldValue(`items.${idx}.availableQty`, Number(stockRecord.quantity));
+                            if (!selectedWH) {
+                              setFieldValue(`items.${idx}.availableQty`, 0);
                             } else {
-                              const globalProd = productList.find(p => p.product_name === rowItem.itemName);
-                              setFieldValue(`items.${idx}.availableQty`, globalProd ? Number(globalProd.current_stock) : 0);
+                              const { data: stockRecord } = await supabase
+                                .from('warehouse_inventory')
+                                .select('quantity')
+                                .ilike('product_name', rowItem.itemName)
+                                .ilike('warehouse_name', selectedWH)
+                                .maybeSingle();
+
+                              setFieldValue(`items.${idx}.availableQty`, stockRecord ? Number(stockRecord.quantity) : 0);
                             }
                           }
                         }

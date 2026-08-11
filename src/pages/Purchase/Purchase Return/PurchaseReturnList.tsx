@@ -59,8 +59,26 @@ const PurchaseReturnList = () => {
       const { data: targetRecord } = await supabase.from('purchase_returns').select('items, source_warehouse').eq('id', id).single();
       if (targetRecord?.items) {
         for (const item of targetRecord.items) {
-          const { data: p } = await supabase.from('warehouse_inventory').select('id, quantity').eq('product_name', item.itemName).eq('warehouse_name', targetRecord.source_warehouse).maybeSingle();
-          if (p) await supabase.from('warehouse_inventory').update({ quantity: Number(p.quantity) + Number(item.qty) }).eq('id', p.id);
+          const qty = Number(item.qty || item.quantity || 0);
+          const pName = item.itemName || item.product_name;
+
+          if (pName) {
+            // 1. Increase Master Product Stock (+)
+            const { data: prod } = await supabase.from('products').select('current_stock').ilike('product_name', pName).maybeSingle();
+            if (prod) {
+              await supabase.from('products').update({ current_stock: (Number(prod.current_stock) || 0) + qty }).ilike('product_name', pName);
+            }
+
+            // 2. Increase Source Location Warehouse Stock (+)
+            if (targetRecord.source_warehouse) {
+              const { data: p } = await supabase.from('warehouse_inventory').select('id, quantity').ilike('product_name', pName).ilike('warehouse_name', targetRecord.source_warehouse).maybeSingle();
+              if (p) {
+                await supabase.from('warehouse_inventory').update({ quantity: (Number(p.quantity) || 0) + qty }).eq('id', p.id);
+              } else {
+                await supabase.from('warehouse_inventory').insert([{ product_name: pName, warehouse_name: targetRecord.source_warehouse, quantity: qty }]);
+              }
+            }
+          }
         }
       }
       const { error } = await supabase.from('purchase_returns').delete().eq('id', id);

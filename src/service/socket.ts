@@ -1,14 +1,14 @@
 import io from 'socket.io-client';
 import { Socket } from 'socket.io-client';
 
-const SOCKET_URL = 'http://localhost:8080';
-const token = localStorage.getItem('token'); // Replace with your actual token
+const SOCKET_URL = import.meta.env.VITE_SOCKET_URL || 'http://localhost:8080';
 
 let socket: typeof Socket | null = null;
 
 // Initialize Socket Connection
 export const initializeSocket = (): void => {
   if (!socket) {
+    const token = localStorage.getItem('token');
     socket = io(SOCKET_URL, {
       auth: {
         token,

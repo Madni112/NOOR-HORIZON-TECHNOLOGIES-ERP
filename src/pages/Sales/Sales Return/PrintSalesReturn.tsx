@@ -3,16 +3,21 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { supabase } from '../../../Context/supabaseClient';
 import { toast } from 'react-hot-toast';
 import Spinner from '../../../ui/Spinner';
-import { MdPrint, MdArrowBack } from 'react-icons/md';
 
 interface ReturnItem {
-  itemName: string;
-  qty: number;
-  returnedQty: number;
-  rp: number;
-  mrp: number;
-  gstRate: number;
-  fTaxPer: number;
+  itemName?: string;
+  product_name?: string;
+  qty?: number;
+  returnedQty?: number;
+  quantity?: number;
+  rp?: number;
+  mrp?: number;
+  rate?: number;
+  price?: number;
+  gstRate?: number;
+  gst_rate?: number;
+  fTaxPer?: number;
+  f_tax_per?: number;
   location?: string;
 }
 
@@ -20,15 +25,19 @@ interface ReturnData {
   id: number;
   original_invoice_no: string;
   customer_name: string;
-  salesman: string;
-  scenario_type: string;
-  return_date: string;
-  return_type: string;
-  remarks: string;
-  total_quantity: number;
-  total_amount: number;
-  total_gst_amount: number;
-  total_net_amount: number;
+  salesman?: string;
+  scenario_type?: string;
+  return_date?: string;
+  return_type?: string;
+  settlement_mode?: string;
+  return_status?: string;
+  remarks?: string;
+  total_quantity?: number;
+  total_amount?: number;
+  total_gst_amount?: number;
+  total_net_amount?: number;
+  payout_amount_paid?: number;
+  fbr_fiscal_number?: string;
   items: ReturnItem[];
   created_at: string;
 }
@@ -72,6 +81,53 @@ const PrintSalesReturn = () => {
 
   if (!returnRecord) return null;
 
+  const rawOrigInvStr = String(returnRecord.original_invoice_no || '').trim();
+  const displayOrigInvNo = rawOrigInvStr.toUpperCase().startsWith('INV-')
+    ? rawOrigInvStr
+    : (rawOrigInvStr ? `INV-${rawOrigInvStr.padStart(4, '0')}` : 'N/A');
+
+  const rawItems = Array.isArray(returnRecord.items)
+    ? returnRecord.items
+    : JSON.parse((returnRecord.items as any) || '[]');
+
+  let computedTotalBase = 0;
+  let computedTotalGst = 0;
+  let computedTotalNet = 0;
+
+  const processedItems = rawItems.map((item: any) => {
+    const pName = item.itemName || item.product_name || item.item_name || 'Item';
+    const rQty = Number(item.qty ?? item.returnedQty ?? item.quantity ?? item.returned_qty ?? 0);
+    const isThirdSchedule = returnRecord.scenario_type === "Sale of 3rd Schedule Goods";
+    const basePrice = isThirdSchedule
+      ? Number(item.mrp ?? item.rp ?? item.rate ?? item.price ?? 0)
+      : Number(item.rp ?? item.mrp ?? item.rate ?? item.price ?? 0);
+
+    const gstRate = Number(item.gstRate ?? item.gst_rate ?? item.gst ?? 18);
+    const fTaxPer = Number(item.fTaxPer ?? item.f_tax_per ?? item.ftax ?? 0);
+
+    const baseAmount = basePrice * rQty;
+    const gstAmount = (baseAmount * gstRate) / 100;
+    const fTaxAmount = (baseAmount * fTaxPer) / 100;
+    const netRowAmount = baseAmount + gstAmount + fTaxAmount;
+
+    computedTotalBase += baseAmount;
+    computedTotalGst += gstAmount;
+    computedTotalNet += netRowAmount;
+
+    return {
+      pName,
+      rQty,
+      basePrice,
+      gstRate,
+      gstAmount,
+      netRowAmount
+    };
+  });
+
+  const finalTotalGoods = computedTotalBase > 0 ? computedTotalBase : Number(returnRecord.total_amount || 0);
+  const finalTotalGst = computedTotalGst > 0 ? computedTotalGst : Number(returnRecord.total_gst_amount || 0);
+  const finalTotalNet = computedTotalNet > 0 ? computedTotalNet : (Number(returnRecord.total_net_amount || returnRecord.total_amount || 0));
+
   return (
     <div className="mx-auto max-w-4xl p-4 md:p-8 bg-white text-black font-sans min-h-screen relative">
       <style>{`
@@ -102,7 +158,7 @@ const PrintSalesReturn = () => {
             display: flex !important;
             flex-direction: column !important;
             width: 100% !important;
-            min-height: 250mm !important;
+            min-height: 240mm !important;
             justify-content: space-between !important;
             border: none !important;
             box-shadow: none !important;
@@ -150,10 +206,13 @@ const PrintSalesReturn = () => {
             <div className="space-y-1">
               <p><span className="text-gray-500">Return Note # :</span> <span className="text-black font-bold">{`RTN-${String(returnRecord.id).padStart(4, '0')}`}</span></p>
               <p><span className="text-gray-500">Return Date :</span> <span className="text-black font-bold">{returnRecord.return_date || new Date(returnRecord.created_at).toLocaleDateString()}</span></p>
-              <p><span className="text-gray-500">Settlement Type :</span> <span className="text-black font-bold text-danger">{returnRecord.return_type}</span></p>
+              <p><span className="text-gray-500">Settlement Type :</span> <span className="text-black font-bold text-danger">{returnRecord.settlement_mode || returnRecord.return_type || returnRecord.return_status || 'On Credit'}</span></p>
+              {returnRecord.fbr_fiscal_number && (
+                <p><span className="text-gray-500">FBR Fiscal Code :</span> <span className="text-success font-bold font-mono">{returnRecord.fbr_fiscal_number}</span></p>
+              )}
             </div>
             <div className="space-y-1 md:text-left">
-              <p><span className="text-gray-500">Original Invoice # :</span> <span className="text-black font-bold">{`INV-${String(returnRecord.original_invoice_no).padStart(4, '0')}`}</span></p>
+              <p><span className="text-gray-500">Original Invoice # :</span> <span className="text-black font-bold">{displayOrigInvNo}</span></p>
               <p><span className="text-gray-500">Customer Name :</span> <span className="text-black font-bold">{returnRecord.customer_name}</span></p>
               <p><span className="text-gray-500">Salesman Name :</span> <span className="text-black font-bold">{returnRecord.salesman || 'General'}</span></p>
             </div>
@@ -173,28 +232,17 @@ const PrintSalesReturn = () => {
                 </tr>
               </thead>
               <tbody>
-                {returnRecord.items && returnRecord.items.map((item, idx) => {
-                  const rQty = Number(item.returnedQty) || 0;
-                  const isThirdSchedule = returnRecord.scenario_type === "Sale of 3rd Schedule Goods";
-                  const basePrice = isThirdSchedule ? Number(item.mrp) : Number(item.rp);
-                  
-                  const baseAmount = basePrice * rQty;
-                  const gstAmount = (baseAmount / 100) * (Number(item.gstRate) || 18);
-                  const fTaxAmount = (baseAmount / 100) * (Number(item.fTaxPer) || 0);
-                  const netRowAmount = baseAmount + gstAmount + fTaxAmount;
-
-                  return (
-                    <tr key={idx} className="font-medium text-center">
-                      <td className="border border-gray-300 p-2 bg-gray-50/50">{idx + 1}</td>
-                      <td className="border border-gray-300 p-2 text-left font-semibold text-black">{item.itemName}</td>
-                      <td className="border border-gray-300 p-2">{basePrice.toFixed(2)}</td>
-                      <td className="border border-gray-300 p-2 font-bold text-danger">{rQty}</td>
-                      <td className="border border-gray-300 p-2">{item.gstRate}%</td>
-                      <td className="border border-gray-300 p-2">{gstAmount.toFixed(2)}</td>
-                      <td className="border border-gray-300 p-2 font-bold text-black">{netRowAmount.toFixed(2)}</td>
-                    </tr>
-                  );
-                })}
+                {processedItems.map((item: any, idx: number) => (
+                  <tr key={idx} className="font-medium text-center">
+                    <td className="border border-gray-300 p-2 bg-gray-50/50">{idx + 1}</td>
+                    <td className="border border-gray-300 p-2 text-left font-semibold text-black">{item.pName}</td>
+                    <td className="border border-gray-300 p-2 font-mono">{item.basePrice.toFixed(2)}</td>
+                    <td className="border border-gray-300 p-2 font-bold text-danger">{item.rQty}</td>
+                    <td className="border border-gray-300 p-2">{item.gstRate}%</td>
+                    <td className="border border-gray-300 p-2 font-mono">{item.gstAmount.toFixed(2)}</td>
+                    <td className="border border-gray-300 p-2 font-bold text-black font-mono">{item.netRowAmount.toFixed(2)}</td>
+                  </tr>
+                ))}
               </tbody>
             </table>
           </div>
@@ -206,21 +254,21 @@ const PrintSalesReturn = () => {
             <div className="w-1/3 text-xs space-y-1.5 font-medium">
               <div className="flex justify-between border-b pb-1">
                 <span>Total Reverted Goods:</span>
-                <span>{Number(returnRecord.total_amount || 0).toFixed(2)}</span>
+                <span className="font-mono font-bold">{finalTotalGoods.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
               </div>
               <div className="flex justify-between border-b pb-1">
                 <span>Total Sales Tax Reverted:</span>
-                <span>{Number(returnRecord.total_gst_amount || 0).toFixed(2)}</span>
+                <span className="font-mono font-bold">{finalTotalGst.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
               </div>
               <div className="flex justify-between pt-1 text-danger font-extrabold text-sm uppercase">
                 <span>Total Credit Adjusted:</span>
-                <span>{Number(returnRecord.total_net_amount || 0).toFixed(2)}</span>
+                <span className="font-mono font-bold">Rs. {finalTotalNet.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
               </div>
             </div>
           </div>
         </div>
 
-        <div className="grid grid-cols-2 gap-12 pt-24 text-center text-[11px] font-bold uppercase tracking-wider text-gray-600 mt-auto">
+        <div className="grid grid-cols-2 gap-12 pt-24 mt-auto text-center text-[11px] font-bold uppercase tracking-wider text-gray-600">
           <div><div className="border-t border-black pt-2">Authorized Signature</div></div>
           <div><div className="border-t border-black pt-2">Customer Acknowledgment</div></div>
         </div>

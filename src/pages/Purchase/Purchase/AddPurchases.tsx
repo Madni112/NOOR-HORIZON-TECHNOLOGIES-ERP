@@ -138,21 +138,21 @@ const AddPurchases = () => {
                 const { data: oldPur } = await supabase.from('supplier_purchases').select('items, target_warehouse').eq('id', editData.id).single();
                 if (oldPur?.items) {
                   for (const oldItem of oldPur.items) {
-                    const { data: p } = await supabase.from('warehouse_inventory').select('id, quantity').eq('product_name', oldItem.itemName).eq('warehouse_name', oldPur.target_warehouse).maybeSingle();
+                    const { data: p } = await supabase.from('warehouse_inventory').select('id, quantity').ilike('product_name', oldItem.itemName).ilike('warehouse_name', oldPur.target_warehouse).maybeSingle();
                     if (p) await supabase.from('warehouse_inventory').update({ quantity: Math.max(0, Number(p.quantity) - Number(oldItem.qty)) }).eq('id', p.id);
                   }
                 }
                 const { error } = await supabase.from('supplier_purchases').update(databasePayload).eq('id', editData.id);
                 if (error) throw error;
                 for (const newItem of values.items) {
-                  const { data: p } = await supabase.from('warehouse_inventory').select('id, quantity').eq('product_name', newItem.itemName).eq('warehouse_name', values.targetWarehouse).maybeSingle();
+                  const { data: p } = await supabase.from('warehouse_inventory').select('id, quantity').ilike('product_name', newItem.itemName).ilike('warehouse_name', values.targetWarehouse).maybeSingle();
                   if (p) await supabase.from('warehouse_inventory').update({ quantity: Number(p.quantity) + Number(newItem.qty) }).eq('id', p.id);
                 }
               } else {
                 const { error } = await supabase.from('supplier_purchases').insert([databasePayload]);
                 if (error) throw error;
                 for (const item of values.items) {
-                  const { data: p } = await supabase.from('warehouse_inventory').select('id, quantity').eq('product_name', item.itemName).eq('warehouse_name', values.targetWarehouse).maybeSingle();
+                  const { data: p } = await supabase.from('warehouse_inventory').select('id, quantity').ilike('product_name', item.itemName).ilike('warehouse_name', values.targetWarehouse).maybeSingle();
                   if (p) {
                     await supabase.from('warehouse_inventory').update({ quantity: Number(p.quantity) + Number(item.qty) }).eq('id', p.id);
                   } else {

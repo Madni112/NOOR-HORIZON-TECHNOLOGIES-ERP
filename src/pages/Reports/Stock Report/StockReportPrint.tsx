@@ -19,6 +19,49 @@ const StockReportPrint = () => {
             try {
                 setLoading(true);
 
+                // Handling Stock Transfer Statement (Tab 4) separately
+                if (activeTab === 4) {
+                    let transferQuery = supabase.from('stock_transfers').select('*').order('created_at', { ascending: false });
+                    const { data: transfers, error: transferError } = await transferQuery;
+                    if (transferError) throw transferError;
+
+                    const dateFromClean = filters.dateFrom ? String(filters.dateFrom).trim() : '';
+                    const dateToClean = filters.dateTo ? String(filters.dateTo).trim() : '';
+                    const targetLocation = String(filters.location || 'All').trim().toLowerCase();
+                    const targetEmployee = String(filters.employee || 'All').trim().toLowerCase();
+                    const targetProduct = String(filters.product || 'All').trim().toLowerCase();
+
+                    const filteredTransfers = (transfers || []).filter((t: any) => {
+                        const tDate = String(t.transfer_date || t.created_at || '').split('T')[0].split(' ')[0];
+                        if (dateFromClean && tDate < dateFromClean) return false;
+                        if (dateToClean && tDate > dateToClean) return false;
+
+                        if (targetLocation !== 'all') {
+                            const fromLoc = String(t.from_location || '').trim().toLowerCase();
+                            const toLoc = String(t.to_location || '').trim().toLowerCase();
+                            if (fromLoc !== targetLocation && toLoc !== targetLocation) return false;
+                        }
+
+                        if (targetEmployee !== 'all') {
+                            const emp = String(t.employee || t.created_by || '').trim().toLowerCase();
+                            if (!emp.includes(targetEmployee)) return false;
+                        }
+
+                        if (targetProduct !== 'all') {
+                            const itemsArray = Array.isArray(t.items) ? t.items : JSON.parse(t.items || '[]');
+                            const hasProd = itemsArray.some((i: any) =>
+                                String(i.itemName || i.product_name || i.item_name || '').trim().toLowerCase().includes(targetProduct)
+                            );
+                            if (!hasProd) return false;
+                        }
+
+                        return true;
+                    });
+
+                    setReportRows(filteredTransfers);
+                    return;
+                }
+
                 // 1. Fetch base product list mapping
                 let prodQuery = supabase.from('products').select('*');
                 if (filters.brand && filters.brand !== 'All') prodQuery = prodQuery.eq('brand', filters.brand);
@@ -34,12 +77,28 @@ const StockReportPrint = () => {
                 const { data: pReturns } = await supabase.from('purchase_returns').select('*');
                 const { data: sReturns } = await supabase.from('sales_returns').select('*');
 
+                const asOfDateClean = (activeTab === 3 && filters.asOfDate) ? String(filters.asOfDate).trim() : '';
+                const dateFromClean = filters.dateFrom ? String(filters.dateFrom).trim() : '';
+                const dateToClean = asOfDateClean || (filters.dateTo ? String(filters.dateTo).trim() : '');
+
+                const parseDateStr = (item: any, dateFields: string[]) => {
+                    for (const f of dateFields) {
+                        if (item[f]) {
+                            const str = String(item[f]).trim();
+                            if (str.includes('T')) return str.split('T')[0];
+                            if (str.includes(' ')) return str.split(' ')[0];
+                            return str;
+                        }
+                    }
+                    return '';
+                };
+
                 const calculatedAggregatedRows = (baseProducts || []).map(product => {
                     const name = String(product.product_name || '').trim().toLowerCase();
                     const targetLocation = String(filters.location || 'All').trim().toLowerCase();
 
-                    // A. Calculate Opening Stock for the specific selected location
-                    const totalOpening = (openStocks || [])
+                    // A. Calculate Base Opening Stock from initial opening_stocks table
+                    const baseOpening = (openStocks || [])
                         .filter((os: any) => {
                             const osName = String(os.product_name || os.item_name || os.itemName || '').trim().toLowerCase();
                             const osLoc = String(os.location || os.target_warehouse || '').trim().toLowerCase();
@@ -49,85 +108,267 @@ const StockReportPrint = () => {
                         })
                         .reduce((sum: number, os: any) => sum + (Number(os.quantity || os.qty || 0)), 0);
 
-                    // B. Calculate Purchased Stock (Ignores deleted or cancelled rows)
-                    let totalPurchased = 0;
+                    let priorIn = 0;
+                    let priorOut = 0;
+                    let periodIn = 0;
+                    let periodOut = 0;
+
+                    // B. Purchases
                     (purchases || []).forEach((p: any) => {
                         const pLoc = String(p.target_warehouse || p.location || '').trim().toLowerCase();
                         const matchLoc = (targetLocation === 'all' || pLoc === targetLocation);
 
                         if (matchLoc && String(p.status).toLowerCase() !== 'cancel' && String(p.status).toLowerCase() !== 'deleted') {
+                            const pDate = parseDateStr(p, ['purchase_date', 'created_at', 'date']);
                             const itemsArray = Array.isArray(p.items) ? p.items : JSON.parse(p.items || '[]');
+
                             itemsArray.forEach((item: any) => {
                                 const pName = String(item.product_name || item.itemName || item.item_name || '').trim().toLowerCase();
                                 if (pName === name || pName.includes(name)) {
-                                    totalPurchased += (Number(item.qty || item.quantity || 0));
+                                    const qty = Number(item.qty || item.quantity || 0);
+                                    if (dateFromClean && pDate < dateFromClean) {
+                                        priorIn += qty;
+                                    } else if ((!dateFromClean || pDate >= dateFromClean) && (!dateToClean || pDate <= dateToClean)) {
+                                        periodIn += qty;
+                                    }
                                 }
                             });
                         }
                     });
 
-                    // C. Calculate Sold Stock (Ignores unposted, deleted, or cancelled transactions)
-                    let totalSold = 0;
-                    (sales || []).forEach((s: any) => {
-                        const sLoc = String(s.dispatch_warehouse || s.location || '').trim().toLowerCase();
-                        const matchLoc = (targetLocation === 'all' || sLoc === targetLocation);
-                        const statusClean = String(s.sale_status || '').trim().toLowerCase();
-                        const receiptClean = String(s.receipt_status || '').trim().toLowerCase();
-
-                        if (matchLoc && statusClean !== 'cancel' && statusClean !== 'deleted' && receiptClean !== 'unposted') {
-                            const itemsArray = Array.isArray(s.items) ? s.items : JSON.parse(s.items || '[]');
-                            itemsArray.forEach((item: any) => {
-                                const sName = String(item.product_name || item.itemName || item.item_name || '').trim().toLowerCase();
-                                if (sName === name || sName.includes(name)) {
-                                    totalSold += (Number(item.qty || item.quantity || 0));
-                                }
-                            });
-                        }
-                    });
-
-                    // D. Calculate Purchase Returns (Stock leaving the warehouse)
-                    let totalPurchaseReturned = 0;
-                    (pReturns || []).forEach((pr: any) => {
-                        const prLoc = String(pr.source_warehouse || pr.location || '').trim().toLowerCase();
-                        const matchLoc = (targetLocation === 'all' || prLoc === targetLocation);
-
-                        if (matchLoc && String(pr.status).toLowerCase() !== 'cancel') {
-                            const itemsArray = Array.isArray(pr.items) ? pr.items : JSON.parse(pr.items || '[]');
-                            itemsArray.forEach((item: any) => {
-                                const prName = String(item.product_name || item.itemName || item.item_name || '').trim().toLowerCase();
-                                if (prName === name || prName.includes(name)) {
-                                    totalPurchaseReturned += (Number(item.qty || item.quantity || 0));
-                                }
-                            });
-                        }
-                    });
-
-                    // E. Calculate Sales Returns (Stock returning back to the warehouse)
-                    let totalSalesReturned = 0;
+                    // C. Sales Returns (Stock In)
                     (sReturns || []).forEach((sr: any) => {
                         const srLoc = String(sr.dispatch_warehouse || sr.location || '').trim().toLowerCase();
                         const matchLoc = (targetLocation === 'all' || srLoc === targetLocation);
 
                         if (matchLoc && String(sr.status).toLowerCase() !== 'cancel') {
+                            const srDate = parseDateStr(sr, ['return_date', 'created_at', 'date']);
                             const itemsArray = Array.isArray(sr.items) ? sr.items : JSON.parse(sr.items || '[]');
+
                             itemsArray.forEach((item: any) => {
                                 const srName = String(item.product_name || item.itemName || item.item_name || '').trim().toLowerCase();
                                 if (srName === name || srName.includes(name)) {
-                                    totalSalesReturned += (Number(item.qty || item.quantity || 0));
+                                    const qty = Number(item.qty || item.quantity || 0);
+                                    if (dateFromClean && srDate < dateFromClean) {
+                                        priorIn += qty;
+                                    } else if ((!dateFromClean || srDate >= dateFromClean) && (!dateToClean || srDate <= dateToClean)) {
+                                        periodIn += qty;
+                                    }
                                 }
                             });
                         }
                     });
 
-                    // ✅ THE PERFECT DYNAMIC STOCK FORMULA FOR SPECIFIC LOCATIONS
-                    const trueRemainingStock = (totalOpening + totalPurchased + totalSalesReturned) - (totalSold + totalPurchaseReturned);
+                    // D. Sales Invoices (Stock Out)
+                    (sales || []).forEach((s: any) => {
+                        const sLoc = String(s.dispatch_warehouse || s.location || '').trim().toLowerCase();
+                        const matchLoc = (targetLocation === 'all' || sLoc === targetLocation);
+                        const statusClean = String(s.sale_status || '').trim().toLowerCase();
+                        if (matchLoc && statusClean !== 'cancel' && statusClean !== 'deleted') {
+                            const sDate = parseDateStr(s, ['sale_date', 'created_at', 'date']);
+                            const itemsArray = Array.isArray(s.items) ? s.items : JSON.parse(s.items || '[]');
+
+                            itemsArray.forEach((item: any) => {
+                                const sName = String(item.product_name || item.itemName || item.item_name || '').trim().toLowerCase();
+                                if (sName === name || sName.includes(name)) {
+                                    const qty = Number(item.qty || item.quantity || 0);
+                                    if (dateFromClean && sDate < dateFromClean) {
+                                        priorOut += qty;
+                                    } else if ((!dateFromClean || sDate >= dateFromClean) && (!dateToClean || sDate <= dateToClean)) {
+                                        periodOut += qty;
+                                    }
+                                }
+                            });
+                        }
+                    });
+
+                    // E. Purchase Returns (Stock Out)
+                    (pReturns || []).forEach((pr: any) => {
+                        const prLoc = String(pr.source_warehouse || pr.location || '').trim().toLowerCase();
+                        const matchLoc = (targetLocation === 'all' || prLoc === targetLocation);
+
+                        if (matchLoc && String(pr.status).toLowerCase() !== 'cancel') {
+                            const prDate = parseDateStr(pr, ['return_date', 'created_at', 'date']);
+                            const itemsArray = Array.isArray(pr.items) ? pr.items : JSON.parse(pr.items || '[]');
+
+                            itemsArray.forEach((item: any) => {
+                                const prName = String(item.product_name || item.itemName || item.item_name || '').trim().toLowerCase();
+                                if (prName === name || prName.includes(name)) {
+                                    const qty = Number(item.qty || item.quantity || 0);
+                                    if (dateFromClean && prDate < dateFromClean) {
+                                        priorOut += qty;
+                                    } else if ((!dateFromClean || prDate >= dateFromClean) && (!dateToClean || prDate <= dateToClean)) {
+                                        periodOut += qty;
+                                    }
+                                }
+                            });
+                        }
+                    });
+
+                    const computedOpening = baseOpening + priorIn - priorOut;
+                    const netActivity = periodIn - periodOut;
+                    const trueRemainingStock = computedOpening + netActivity;
 
                     return {
                         ...product,
+                        computed_opening: computedOpening,
+                        period_stock_in: periodIn,
+                        period_stock_out: periodOut,
+                        net_activity: netActivity,
                         computed_true_stock: trueRemainingStock,
                         calculated_valuation: trueRemainingStock * Number(product.retail_price || product.sale_price || 0)
                     };
                 });
+
+                // --- 📍 TAB 8 SPECIFIC: PER-LOCATION DYNAMIC TRANSACTION LEDGER BREAKDOWN ---
+                if (activeTab === 8) {
+                    const { data: dbLocs } = await supabase.from('inventory_locations').select('name');
+                    const registeredLocs = (dbLocs && dbLocs.length > 0)
+                        ? dbLocs.map(l => String(l.name).trim())
+                        : ['Market', 'Latifabad', 'Main Warehouse'];
+
+                    const { data: transfers } = await supabase.from('stock_transfers').select('*');
+
+                    const locationRows: any[] = [];
+                    const targetLocFilter = String(filters.location || 'All').trim().toLowerCase();
+
+                    for (const product of (baseProducts || [])) {
+                        const name = String(product.product_name || '').trim().toLowerCase();
+                        const rate = Number(product.retail_price || product.sale_price || product.price || 0);
+
+                        const locationStockMap: { [loc: string]: number } = {};
+
+                        const getNormalizedLocName = (rawLoc: string) => {
+                            if (!rawLoc) return registeredLocs[0] || 'Market';
+                            const clean = String(rawLoc).trim();
+                            const matched = registeredLocs.find(l => l.toLowerCase() === clean.toLowerCase());
+                            return matched || clean;
+                        };
+
+                        // 1. Opening Stock
+                        (openStocks || []).forEach((os: any) => {
+                            const osName = String(os.product_name || os.item_name || os.itemName || '').trim().toLowerCase();
+                            if (osName === name || osName.includes(name)) {
+                                const loc = getNormalizedLocName(os.location || os.target_warehouse || os.warehouse_name);
+                                const qty = Number(os.quantity || os.qty || 0);
+                                locationStockMap[loc] = (locationStockMap[loc] || 0) + qty;
+                            }
+                        });
+
+                        // 2. Purchases (Stock In)
+                        (purchases || []).forEach((p: any) => {
+                            if (String(p.status).toLowerCase() !== 'cancel' && String(p.status).toLowerCase() !== 'deleted') {
+                                const loc = getNormalizedLocName(p.target_warehouse || p.location);
+                                const items = Array.isArray(p.items) ? p.items : JSON.parse(p.items || '[]');
+                                items.forEach((i: any) => {
+                                    const iName = String(i.product_name || i.itemName || i.item_name || '').trim().toLowerCase();
+                                    if (iName === name || iName.includes(name)) {
+                                        const qty = Number(i.qty || i.quantity || 0);
+                                        locationStockMap[loc] = (locationStockMap[loc] || 0) + qty;
+                                    }
+                                });
+                            }
+                        });
+
+                        // 3. Sales Returns (Stock In)
+                        (sReturns || []).forEach((sr: any) => {
+                            if (String(sr.status).toLowerCase() !== 'cancel') {
+                                const loc = getNormalizedLocName(sr.dispatch_warehouse || sr.location);
+                                const items = Array.isArray(sr.items) ? sr.items : JSON.parse(sr.items || '[]');
+                                items.forEach((i: any) => {
+                                    const iName = String(i.product_name || i.itemName || i.item_name || '').trim().toLowerCase();
+                                    if (iName === name || iName.includes(name)) {
+                                        const qty = Number(i.qty || i.quantity || 0);
+                                        locationStockMap[loc] = (locationStockMap[loc] || 0) + qty;
+                                    }
+                                });
+                            }
+                        });
+
+                        // 4. Stock Transfers (Movement between locations)
+                        (transfers || []).forEach((t: any) => {
+                            if (String(t.status).toLowerCase() !== 'cancelled') {
+                                const fromLoc = getNormalizedLocName(t.from_location);
+                                const toLoc = getNormalizedLocName(t.to_location);
+                                const items = Array.isArray(t.items) ? t.items : JSON.parse(t.items || '[]');
+                                items.forEach((i: any) => {
+                                    const iName = String(i.product_name || i.itemName || i.item_name || '').trim().toLowerCase();
+                                    if (iName === name || iName.includes(name)) {
+                                        const qty = Number(i.qty || i.quantity || 0);
+                                        locationStockMap[fromLoc] = (locationStockMap[fromLoc] || 0) - qty;
+                                        locationStockMap[toLoc] = (locationStockMap[toLoc] || 0) + qty;
+                                    }
+                                });
+                            }
+                        });
+
+                        // 5. Sales Invoices (Stock Out)
+                        (sales || []).forEach((s: any) => {
+                            const statusClean = String(s.sale_status || '').trim().toLowerCase();
+                            if (statusClean !== 'cancel' && statusClean !== 'deleted') {
+                                const loc = getNormalizedLocName(s.dispatch_warehouse || s.location);
+                                const items = Array.isArray(s.items) ? s.items : JSON.parse(s.items || '[]');
+                                items.forEach((i: any) => {
+                                    const iName = String(i.product_name || i.itemName || i.item_name || '').trim().toLowerCase();
+                                    if (iName === name || iName.includes(name)) {
+                                        const qty = Number(i.qty || i.quantity || 0);
+                                        locationStockMap[loc] = (locationStockMap[loc] || 0) - qty;
+                                    }
+                                });
+                            }
+                        });
+
+                        // 6. Purchase Returns (Stock Out)
+                        (pReturns || []).forEach((pr: any) => {
+                            if (String(pr.status).toLowerCase() !== 'cancel') {
+                                const loc = getNormalizedLocName(pr.source_warehouse || pr.location);
+                                const items = Array.isArray(pr.items) ? pr.items : JSON.parse(pr.items || '[]');
+                                items.forEach((i: any) => {
+                                    const iName = String(i.product_name || i.itemName || i.item_name || '').trim().toLowerCase();
+                                    if (iName === name || iName.includes(name)) {
+                                        const qty = Number(i.qty || i.quantity || 0);
+                                        locationStockMap[loc] = (locationStockMap[loc] || 0) - qty;
+                                    }
+                                });
+                            }
+                        });
+
+                        const activeLocations = Object.keys(locationStockMap);
+                        if (activeLocations.length === 0) {
+                            activeLocations.push(registeredLocs[0] || 'Market');
+                            locationStockMap[activeLocations[0]] = Number(product.current_stock || product.stock || 0);
+                        }
+
+                        for (const locName of activeLocations) {
+                            const qty = locationStockMap[locName] || 0;
+                            if (targetLocFilter === 'all' || locName.toLowerCase() === targetLocFilter) {
+                                locationRows.push({
+                                    ...product,
+                                    id: `${product.id}_${locName}`,
+                                    warehouse_location: locName,
+                                    computed_true_stock: qty,
+                                    calculated_valuation: qty * rate
+                                });
+
+                                try {
+                                    await supabase.from('warehouse_inventory').upsert({
+                                        product_name: product.product_name,
+                                        warehouse_name: locName,
+                                        quantity: qty
+                                    }, { onConflict: 'product_name,warehouse_name' });
+                                } catch (e) {}
+                            }
+                        }
+                    }
+
+                    let finalLocPool = locationRows;
+                    if (filters.product && filters.product !== 'All') {
+                        finalLocPool = finalLocPool.filter(p => p.product_name === filters.product);
+                    }
+                    setReportRows(finalLocPool);
+                    setLoading(false);
+                    return;
+                }
 
                 let finalFilteredPool = calculatedAggregatedRows;
 
@@ -166,7 +407,7 @@ const StockReportPrint = () => {
                 </div>
 
                 <div className="text-center space-y-1 py-4 border-b border-double border-black">
-                    <h1 className="text-xl font-black uppercase tracking-widest font-serif">AL-SYED SOFTWARE ERP LOGISTICS</h1>
+                    <h1 className="text-xl font-black uppercase tracking-widest font-serif">SOFTHUB-PK ERP SOFTWARE</h1>
                     <p className="text-[10px] font-bold tracking-wider text-gray-500 uppercase">Master Dynamic Inventory Valuation & Real-Time Stock Balance Ledger</p>
                     <div className="text-[10px] pt-1 font-mono flex justify-between px-2 text-gray-600">
                         <span>Workbook Subtype: <b className="text-black uppercase underline">
@@ -177,14 +418,70 @@ const StockReportPrint = () => {
                             {activeTab === 5 && 'Detailed Pricing Metrics Sheet'}
                             {activeTab === 6 && 'Core Product Specification Log'}
                             {activeTab === 7 && 'Status Detail Valuation Ledger'}
+                            {activeTab === 8 && 'Location Stock Breakdown Statement'}
                         </b></span>
-                        <span>Live Audit Evaluation Date: {new Date().toLocaleDateString()}</span>
+                        {(activeTab === 1 || activeTab === 4) && filters.dateFrom && filters.dateTo && (
+                            <span className="font-bold text-primary">
+                                Date Period: {filters.dateFrom} to {filters.dateTo}
+                            </span>
+                        )}
+                        <span>
+                            {(activeTab === 3 || activeTab === 8) && filters.asOfDate
+                                ? `Audit Evaluation Date (As Of): ${filters.asOfDate}`
+                                : `Live Audit Evaluation Date: ${new Date().toLocaleDateString()}`}
+                        </span>
                     </div>
                 </div>
 
                 <div className="w-full overflow-x-auto">
-                    {/* --- 📊 RENDER CHANNEL 1: STANDARD TRUE LEDGER BALANCES MATRIX (TABS 1, 2, 3, 6) --- */}
-                    {(activeTab === 1 || activeTab === 2 || activeTab === 3 || activeTab === 6) && (
+                    {/* --- 📊 RENDER CHANNEL 1: STOCK ACTIVITY REPORT (TAB 1) --- */}
+                    {activeTab === 1 && (
+                        <table className="w-full table-auto border border-collapse border-black text-[11px] font-sans text-left">
+                            <thead className="bg-gray-100 border-b border-black font-black uppercase text-black font-mono text-[10px]">
+                                <tr>
+                                    <th className="p-1.5 border border-black text-center w-10">Index</th>
+                                    <th className="p-1.5 border border-black">Product Stock Asset Identifier</th>
+                                    <th className="p-1.5 border border-black">Group (UOM)</th>
+                                    <th className="p-1.5 border border-black">Brand / Category</th>
+                                    <th className="p-1.5 border border-black text-right pr-2">Opening Stock</th>
+                                    <th className="p-1.5 border border-black text-right pr-2 text-blue-700">Stock In</th>
+                                    <th className="p-1.5 border border-black text-right pr-2 text-red-700">Stock Out</th>
+                                    <th className="p-1.5 border border-black text-right pr-2">Net Movement</th>
+                                    <th className="p-1.5 border border-black text-right pr-3 font-bold">Remaining Stock</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {reportRows.map((row, idx) => (
+                                    <tr key={row.id} className="border-b border-black hover:bg-gray-50 font-semibold font-mono text-xs">
+                                        <td className="p-1.5 border border-black text-center text-gray-400">{idx + 1}</td>
+                                        <td className="p-1.5 border border-black font-bold text-black font-sans uppercase">{row.product_name}</td>
+                                        <td className="p-1.5 border border-black uppercase">{row.uom || 'PC'}</td>
+                                        <td className="p-1.5 border border-black font-sans"><span className="text-purple-700 font-bold">{row.brand || 'Generic'}</span> / <span className="text-gray-500">{row.category || 'General'}</span></td>
+                                        <td className="p-1.5 border border-black text-right pr-2 font-mono text-gray-700">{Number(row.computed_opening || 0).toLocaleString()}</td>
+                                        <td className="p-1.5 border border-black text-right pr-2 font-mono text-blue-700 font-bold">+{Number(row.period_stock_in || 0).toLocaleString()}</td>
+                                        <td className="p-1.5 border border-black text-right pr-2 font-mono text-red-700 font-bold">-{Number(row.period_stock_out || 0).toLocaleString()}</td>
+                                        <td className={`p-1.5 border border-black text-right pr-2 font-mono font-bold ${row.net_activity >= 0 ? 'text-green-700' : 'text-red-600'}`}>
+                                            {row.net_activity > 0 ? `+${row.net_activity.toLocaleString()}` : row.net_activity.toLocaleString()}
+                                        </td>
+                                        <td className="p-1.5 border border-black text-right pr-3 text-success font-black font-mono">{Number(row.computed_true_stock || 0).toLocaleString()}</td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                            <tfoot>
+                                <tr className="bg-gray-100 border-t border-black font-black font-mono text-xs">
+                                    <td colSpan={4} className="p-2 border border-black text-right uppercase tracking-wider text-gray-700">Total Consolidated Summary:</td>
+                                    <td className="p-2 border border-black text-right pr-2 text-gray-700">{reportRows.reduce((s, r) => s + (r.computed_opening || 0), 0).toLocaleString()}</td>
+                                    <td className="p-2 border border-black text-right pr-2 text-blue-700">+{reportRows.reduce((s, r) => s + (r.period_stock_in || 0), 0).toLocaleString()}</td>
+                                    <td className="p-2 border border-black text-right pr-2 text-red-700">-{reportRows.reduce((s, r) => s + (r.period_stock_out || 0), 0).toLocaleString()}</td>
+                                    <td className="p-2 border border-black text-right pr-2 text-purple-700">{reportRows.reduce((s, r) => s + (r.net_activity || 0), 0).toLocaleString()}</td>
+                                    <td className="p-2 border border-black text-right pr-3 text-success font-black">{reportRows.reduce((s, r) => s + (r.computed_true_stock || 0), 0).toLocaleString()}</td>
+                                </tr>
+                            </tfoot>
+                        </table>
+                    )}
+
+                    {/* --- 📊 RENDER CHANNEL 2: STANDARD LEDGER BALANCES (TABS 2, 6) --- */}
+                    {(activeTab === 2 || activeTab === 6) && (
                         <table className="w-full table-auto border border-collapse border-black text-[11px] font-sans text-left">
                             <thead className="bg-gray-100 border-b border-black font-black uppercase text-black font-mono text-[10px]">
                                 <tr>
@@ -208,9 +505,108 @@ const StockReportPrint = () => {
                                     </tr>
                                 ))}
                             </tbody>
+                            <tfoot>
+                                <tr className="bg-gray-100 border-t border-black font-black font-mono text-xs">
+                                    <td colSpan={5} className="p-2 border border-black text-right uppercase tracking-wider text-gray-700">Total Consolidated Balance Sum:</td>
+                                    <td className="p-2 border border-black text-right pr-3 text-success font-black text-sm">{reportRows.reduce((s, r) => s + (r.computed_true_stock || 0), 0).toLocaleString()}</td>
+                                </tr>
+                            </tfoot>
                         </table>
                     )}
-                    {/* --- 📊 RENDER CHANNEL 2: REAL-TIME ADAPTIVE PRICING COLUMNS VISIBILITY SHEET (TAB 5) --- */}
+
+                    {/* --- 📊 RENDER CHANNEL 3: STOCK STATUS REPORT (TAB 3) --- */}
+                    {activeTab === 3 && (
+                        <table className="w-full table-auto border border-collapse border-black text-[11px] font-sans text-left">
+                            <thead className="bg-gray-100 border-b border-black font-black uppercase text-black font-mono text-[10px]">
+                                <tr>
+                                    <th className="p-1.5 border border-black text-center w-12">Index</th>
+                                    <th className="p-1.5 border border-black">Product Stock Asset Identifier</th>
+                                    <th className="p-1.5 border border-black">Warehouse Location</th>
+                                    <th className="p-1.5 border border-black">Brand / Category</th>
+                                    <th className="p-1.5 border border-black text-center">Stock Availability Status</th>
+                                    <th className="p-1.5 border border-black text-right pr-3">Dynamic Remaining Quantity</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {reportRows.map((row, idx) => {
+                                    const qty = Number(row.computed_true_stock || 0);
+                                    const loc = filters.location && filters.location !== 'All' ? filters.location : 'All Warehouses';
+                                    let statusBadge = (
+                                        <span className="px-2 py-0.5 rounded text-[10px] font-black uppercase bg-green-100 text-green-800 border border-green-300">
+                                            In Stock
+                                        </span>
+                                    );
+                                    if (qty <= 0) {
+                                        statusBadge = (
+                                            <span className="px-2 py-0.5 rounded text-[10px] font-black uppercase bg-red-100 text-red-800 border border-red-300">
+                                                Out of Stock
+                                            </span>
+                                        );
+                                    } else if (qty <= 10) {
+                                        statusBadge = (
+                                            <span className="px-2 py-0.5 rounded text-[10px] font-black uppercase bg-yellow-100 text-yellow-800 border border-yellow-300">
+                                                Low Stock
+                                            </span>
+                                        );
+                                    }
+
+                                    return (
+                                        <tr key={row.id} className="border-b border-black hover:bg-gray-50 font-semibold font-mono text-xs">
+                                            <td className="p-1.5 border border-black text-center text-gray-400">{idx + 1}</td>
+                                            <td className="p-1.5 border border-black font-bold text-black font-sans uppercase">{row.product_name}</td>
+                                            <td className="p-1.5 border border-black font-sans text-gray-700 font-bold">{loc}</td>
+                                            <td className="p-1.5 border border-black font-sans"><span className="text-purple-700 font-bold">{row.brand || 'Generic'}</span> / <span className="text-gray-500">{row.category || 'General'}</span></td>
+                                            <td className="p-1.5 border border-black text-center">{statusBadge}</td>
+                                            <td className="p-1.5 border border-black text-right pr-3 text-success font-black">{qty.toLocaleString()}</td>
+                                        </tr>
+                                    );
+                                })}
+                            </tbody>
+                            <tfoot>
+                                <tr className="bg-gray-100 border-t border-black font-black font-mono text-xs">
+                                    <td colSpan={5} className="p-2 border border-black text-right uppercase tracking-wider text-gray-700">Total Available Inventory Units:</td>
+                                    <td className="p-2 border border-black text-right pr-3 text-success font-black text-sm">{reportRows.reduce((s, r) => s + (r.computed_true_stock || 0), 0).toLocaleString()}</td>
+                                </tr>
+                            </tfoot>
+                        </table>
+                    )}
+
+                    {/* --- 📊 RENDER CHANNEL 3: STOCK TRANSFER STATEMENT (TAB 4) --- */}
+                    {activeTab === 4 && (
+                        <table className="w-full table-auto border border-collapse border-black text-[11px] font-sans text-left">
+                            <thead className="bg-gray-100 border-b border-black font-black uppercase text-black font-mono text-[10px]">
+                                <tr>
+                                    <th className="p-1.5 border border-black text-center w-12">Index</th>
+                                    <th className="p-1.5 border border-black">Transfer Slip #</th>
+                                    <th className="p-1.5 border border-black">Transfer Date</th>
+                                    <th className="p-1.5 border border-black">From Location</th>
+                                    <th className="p-1.5 border border-black">To Location</th>
+                                    <th className="p-1.5 border border-black">Items Transferred</th>
+                                    <th className="p-1.5 border border-black text-center">Status</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {reportRows.map((tr, idx) => {
+                                    const itemsArray = Array.isArray(tr.items) ? tr.items : JSON.parse(tr.items || '[]');
+                                    const itemSummary = itemsArray.map((i: any) => `${i.itemName || i.product_name} (${i.qty || 1} ${i.uom || ''})`).join(', ');
+
+                                    return (
+                                        <tr key={tr.id} className="border-b border-black hover:bg-gray-50 font-semibold font-mono text-xs">
+                                            <td className="p-1.5 border border-black text-center text-gray-400">{idx + 1}</td>
+                                            <td className="p-1.5 border border-black font-bold text-primary font-sans">{tr.transfer_no || `TRF-${tr.id}`}</td>
+                                            <td className="p-1.5 border border-black">{tr.transfer_date || tr.created_at?.split('T')[0]}</td>
+                                            <td className="p-1.5 border border-black font-sans text-red-700 font-bold">{tr.from_location}</td>
+                                            <td className="p-1.5 border border-black font-sans text-green-700 font-bold">{tr.to_location}</td>
+                                            <td className="p-1.5 border border-black font-sans text-gray-700">{itemSummary || 'N/A'}</td>
+                                            <td className="p-1.5 border border-black text-center font-bold text-purple-700 uppercase">{tr.status || 'Confirmed'}</td>
+                                        </tr>
+                                    );
+                                })}
+                            </tbody>
+                        </table>
+                    )}
+
+                    {/* --- 📊 RENDER CHANNEL 4: REAL-TIME ADAPTIVE PRICING COLUMNS VISIBILITY SHEET (TAB 5) --- */}
                     {activeTab === 5 && (
                         <table className="w-full table-auto border border-collapse border-black text-[11px] font-sans text-left">
                             <thead className="bg-gray-100 border-b border-black font-black uppercase text-black font-mono text-[10px]">
@@ -227,8 +623,8 @@ const StockReportPrint = () => {
                             <tbody>
                                 {reportRows.map((row, idx) => {
                                     const qty = Number(row.computed_true_stock || 0);
-                                    const sPrice = Number(row.retail_price || row.sale_price || 0);
-                                    const pPrice = Number(row.purchase_price || row.cost_price || 0);
+                                    const sPrice = Number(row.sale_price ?? row.retail_price ?? row.price ?? row.unit_price ?? row.mrp ?? row.rp ?? 0);
+                                    const pPrice = Number(row.purchase_price ?? row.cost_price ?? row.buy_price ?? row.cost ?? row.tp ?? 0);
                                     const netValue = qty * sPrice;
 
                                     return (
@@ -239,14 +635,37 @@ const StockReportPrint = () => {
                                             {filters.showSalePrice && <td className="p-1.5 border border-black text-right text-gray-600">Rs. {sPrice.toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>}
                                             {filters.showPurchasePrice && <td className="p-1.5 border border-black text-right text-purple-700">Rs. {pPrice.toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>}
                                             {filters.showFinalPrice && <td className="p-1.5 border border-black text-right text-success font-black pr-3">Rs. {netValue.toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>}
-                                            {filters.showSpecifications && <td className="p-1.5 border border-black font-sans text-[10px] text-gray-500 max-w-xs truncate">{row.specifications || row.description || 'N/A'}</td>}
+                                            {filters.showSpecifications && (
+                                                <td className="p-1.5 border border-black font-sans text-[10px] text-gray-500 whitespace-normal break-words leading-relaxed max-w-sm">
+                                                    {row.product_description || row.specifications || row.description || (row.hs_code ? `HS: ${row.hs_code}` : 'N/A')}
+                                                </td>
+                                            )}
                                         </tr>
                                     );
                                 })}
                             </tbody>
+                            <tfoot>
+                                <tr className="bg-gray-100 border-t border-black font-black font-mono text-xs">
+                                    <td colSpan={2} className="p-2 border border-black text-right uppercase tracking-wider text-gray-700">Total Consolidated Assets Valuation:</td>
+                                    <td className="p-2 border border-black text-center text-primary font-black">{reportRows.reduce((s, r) => s + (r.computed_true_stock || 0), 0).toLocaleString()}</td>
+                                    {filters.showSalePrice && <td className="p-2 border border-black"></td>}
+                                    {filters.showPurchasePrice && <td className="p-2 border border-black"></td>}
+                                    {filters.showFinalPrice && (
+                                        <td className="p-2 border border-black text-right pr-3 text-success font-black text-sm">
+                                            Rs. {reportRows.reduce((s, r) => {
+                                                const q = Number(r.computed_true_stock || 0);
+                                                const sp = Number(r.sale_price ?? r.retail_price ?? r.price ?? r.unit_price ?? r.mrp ?? r.rp ?? 0);
+                                                return s + (q * sp);
+                                            }, 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                                        </td>
+                                    )}
+                                    {filters.showSpecifications && <td className="p-2 border border-black"></td>}
+                                </tr>
+                            </tfoot>
                         </table>
                     )}
-                    {/* --- 📊 RENDER CHANNEL 3: FINANCIAL REAL-TIME VALUE TIERS SUMMARY STATEMENT (TAB 7) --- */}
+
+                    {/* --- 📊 RENDER CHANNEL 5: FINANCIAL REAL-TIME VALUE TIERS SUMMARY STATEMENT (TAB 7) --- */}
                     {activeTab === 7 && (
                         <table className="w-full table-auto border border-collapse border-black text-[11px] font-sans text-left">
                             <thead className="bg-gray-100 border-b border-black font-black uppercase text-black font-mono text-[10px]">
@@ -280,19 +699,92 @@ const StockReportPrint = () => {
                                 <tr className="bg-gray-50 border-t border-black font-black font-mono text-xs">
                                     <td colSpan={5} className="p-2 border border-black text-right uppercase tracking-wider text-gray-500">Gross Consolidated StockValue Assets Allocation Sum (PKR):</td>
                                     <td className="p-2 border border-black text-right pr-4 text-success underline decoration-double text-sm bg-success/10 font-black">
-                                        Rs. {reportRows.reduce((sum, r) => sum + r.calculated_valuation, 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                                        Rs. {reportRows.reduce((sum, r) => sum + (r.calculated_valuation || 0), 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}
                                     </td>
                                 </tr>
                             </tfoot>
                         </table>
                     )}
 
+                    {/* --- 📊 RENDER CHANNEL 6: LOCATION WAREHOUSE STOCK AUDIT STATEMENT (TAB 8) --- */}
+                    {activeTab === 8 && (
+                        <table className="w-full table-auto border border-collapse border-black text-[11px] font-sans text-left">
+                            <thead className="bg-gray-100 border-b border-black font-black uppercase text-black font-mono text-[10px]">
+                                <tr>
+                                    <th className="p-1.5 border border-black text-center w-12">Index</th>
+                                    <th className="p-1.5 border border-black">Warehouse Location</th>
+                                    <th className="p-1.5 border border-black">Product Stock Asset Name</th>
+                                    <th className="p-1.5 border border-black">Group (UOM) / Brand</th>
+                                    <th className="p-1.5 border border-black text-center w-28">Available Stock</th>
+                                    <th className="p-1.5 border border-black text-right w-28">Unit Sale Rate</th>
+                                    <th className="p-1.5 border border-black text-right w-36 pr-3 text-success">Location Asset Valuation</th>
+                                    <th className="p-1.5 border border-black text-center w-28">Stock Availability</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {reportRows.map((row, idx) => {
+                                    const qty = Number(row.computed_true_stock || 0);
+                                    const sPrice = Number(row.sale_price ?? row.retail_price ?? row.price ?? row.unit_price ?? row.mrp ?? row.rp ?? 0);
+                                    const netValue = qty * sPrice;
+                                    const locName = row.warehouse_location || (filters.location && filters.location !== 'All' ? filters.location : 'Main Warehouse');
+
+                                    let statusBadge = (
+                                        <span className="px-2 py-0.5 rounded text-[10px] font-black uppercase bg-green-100 text-green-800 border border-green-300">
+                                            In Stock
+                                        </span>
+                                    );
+                                    if (qty <= 0) {
+                                        statusBadge = (
+                                            <span className="px-2 py-0.5 rounded text-[10px] font-black uppercase bg-red-100 text-red-800 border border-red-300">
+                                                Out of Stock
+                                            </span>
+                                        );
+                                    } else if (qty <= 10) {
+                                        statusBadge = (
+                                            <span className="px-2 py-0.5 rounded text-[10px] font-black uppercase bg-yellow-100 text-yellow-800 border border-yellow-300">
+                                                Low Stock
+                                            </span>
+                                        );
+                                    }
+
+                                    return (
+                                        <tr key={row.id || idx} className="border-b border-black hover:bg-gray-50 font-semibold font-mono text-xs">
+                                            <td className="p-1.5 border border-black text-center text-gray-400">{idx + 1}</td>
+                                            <td className="p-1.5 border border-black font-sans font-bold text-purple-800 uppercase bg-purple-50/40">{locName}</td>
+                                            <td className="p-1.5 border border-black font-bold text-black font-sans uppercase">{row.product_name}</td>
+                                            <td className="p-1.5 border border-black font-sans"><span className="text-gray-700">{row.uom || 'PC'}</span> / <span className="text-purple-700 font-bold">{row.brand || 'Generic'}</span></td>
+                                            <td className="p-1.5 border border-black text-center text-primary font-black text-sm">{qty.toLocaleString()}</td>
+                                            <td className="p-1.5 border border-black text-right text-gray-600">Rs. {sPrice.toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
+                                            <td className="p-1.5 border border-black text-right text-success font-black pr-3 bg-success/5">Rs. {netValue.toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
+                                            <td className="p-1.5 border border-black text-center">{statusBadge}</td>
+                                        </tr>
+                                    );
+                                })}
+                            </tbody>
+                            <tfoot>
+                                <tr className="bg-gray-100 border-t border-black font-black font-mono text-xs">
+                                    <td colSpan={4} className="p-2 border border-black text-right uppercase tracking-wider text-gray-700">Total Location Stock & Valuation Summary:</td>
+                                    <td className="p-2 border border-black text-center text-primary font-black text-sm">{reportRows.reduce((s, r) => s + (r.computed_true_stock || 0), 0).toLocaleString()}</td>
+                                    <td className="p-2 border border-black"></td>
+                                    <td className="p-2 border border-black text-right pr-3 text-success font-black text-sm bg-success/10">
+                                        Rs. {reportRows.reduce((sum, r) => {
+                                            const q = Number(r.computed_true_stock || 0);
+                                            const sp = Number(r.sale_price ?? r.retail_price ?? r.price ?? r.unit_price ?? r.mrp ?? r.rp ?? 0);
+                                            return sum + (q * sp);
+                                        }, 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                                    </td>
+                                    <td className="p-2 border border-black"></td>
+                                </tr>
+                            </tfoot>
+                        </table>
+                    )}
+
                     {reportRows.length === 0 && (
-                        <div className="p-12 text-center border font-bold italic text-gray-400 bg-gray-50/50">No true live ledger ledger rows discovered matching chosen criteria tokens.</div>
+                        <div className="p-12 text-center border font-bold italic text-gray-400 bg-gray-50/50">No true live ledger rows discovered matching chosen criteria tokens.</div>
                     )}
                 </div>
 
-                <div className="mt-20 grid grid-cols-2 gap-20 text-center text-[10px] font-sans font-bold uppercase tracking-wider text-gray-400">
+                <div className="mt-36 pt-16 grid grid-cols-2 gap-20 text-center text-[10px] font-sans font-bold uppercase tracking-wider text-gray-400">
                     <div className="border-t border-black pt-2">Warehouse Master Count Verifier</div>
                     <div className="border-t border-black pt-2">Corporate Internal Management Audit Release</div>
                 </div>

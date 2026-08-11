@@ -81,6 +81,27 @@ const SalesHistory = () => {
   };
 
   const handleDeleteInvoice = async (id: string | number) => {
+    const rawInvoiceIdString = String(id).trim().toLowerCase();
+
+    const isReturned = returnedInvoiceNos.some(retNo => {
+      return (
+        retNo === rawInvoiceIdString ||
+        retNo === `inv-${rawInvoiceIdString}` ||
+        retNo === `inv-${rawInvoiceIdString.padStart(4, '0')}` ||
+        retNo.includes(rawInvoiceIdString)
+      );
+    });
+
+    const targetInv = invoices.find(i => i.id === id);
+    const isReturnedStatus = isReturned ||
+      String(targetInv?.receipt_status).trim().toLowerCase() === 'returned' ||
+      String(targetInv?.sale_status).trim().toLowerCase() === 'returned';
+
+    if (isReturnedStatus) {
+      toast.error('first delete sale return entry to delete this for same invoice');
+      return;
+    }
+
     if (!window.confirm('Are you certain you want to permanently delete this invoice record?')) return;
 
     try {
@@ -105,7 +126,7 @@ const SalesHistory = () => {
           }
 
           if (sourceWarehousePartition) {
-            const { data: localPartitionRow } = await supabase.from('warehouse_inventory').select('id, quantity').eq('product_name', item.itemName).eq('warehouse_name', sourceWarehousePartition).maybeSingle();
+            const { data: localPartitionRow } = await supabase.from('warehouse_inventory').select('id, quantity').ilike('product_name', item.itemName).ilike('warehouse_name', sourceWarehousePartition).maybeSingle();
             if (localPartitionRow) {
               const restoredPartitionStockCount = (Number(localPartitionRow.quantity) || 0) + itemQuantityToRestore;
               await supabase.from('warehouse_inventory').update({ quantity: restoredPartitionStockCount }).eq('id', localPartitionRow.id);
@@ -176,16 +197,17 @@ const SalesHistory = () => {
                 <th className="py-3 px-2 font-bold">Salesman</th>
                 <th className="py-3 px-2 font-bold">Customer</th>
                 <th className="py-3 px-2 font-bold text-center">Receipt Status</th>
-                <th className="py-3 px-2 font-bold text-center">FBR Invoice No</th>
+                <th className="py-3 px-2 font-bold text-center">Tax Invoice Code</th>
+                <th className="py-3 px-2 font-bold text-right pr-2">Amount Received</th>
                 <th className="py-3 px-2 font-bold text-right pr-2">Total Amount</th>
                 <th className="py-3 px-2 font-bold text-center w-14">Action</th>
               </tr>
             </thead>
             <tbody>
               {loading ? (
-                <tr><td colSpan={11} className="text-center py-12"><Spinner /></td></tr>
+                <tr><td colSpan={12} className="text-center py-12"><Spinner /></td></tr>
               ) : paginatedInvoices.length === 0 ? (
-                <tr><td colSpan={11} className="text-center py-10 text-xs text-gray-500">No records located.</td></tr>
+                <tr><td colSpan={12} className="text-center py-10 text-xs text-gray-500">No records located.</td></tr>
               ) : (
                 paginatedInvoices.map((inv) => {
                   const rawInvoiceIdString = String(inv.id).trim().toLowerCase();
@@ -235,6 +257,7 @@ const SalesHistory = () => {
                       </td>
 
                       <td className="py-2.5 px-2 text-center whitespace-nowrap"><span className={`font-bold ${inv.fbr_fiscal_number ? 'text-success' : 'text-brand'}`}>{inv.fbr_fiscal_number || 'Unposted'}</span></td>
+                      <td className="py-2.5 px-2 text-right font-bold text-success font-mono pr-2">Rs. {Number(inv.cash_amount_paid || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
                       <td className="py-2.5 px-2 text-right font-black text-black dark:text-white font-mono pr-2">Rs. {Number(inv.total_amount || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
                       <td className="py-2.5 px-2 text-center">
                         <button
@@ -260,6 +283,18 @@ const SalesHistory = () => {
           const selectedInvoice = invoices.find(i => i.id === openActionId);
           if (!selectedInvoice) return null;
 
+          const rawSelId = String(selectedInvoice.id).trim().toLowerCase();
+          const isSelectedInvoiceReturned = returnedInvoiceNos.some(retNo => {
+            return (
+              retNo === rawSelId ||
+              retNo === `inv-${rawSelId}` ||
+              retNo === `inv-${rawSelId.padStart(4, '0')}` ||
+              retNo.includes(rawSelId)
+            );
+          }) || String(selectedInvoice.receipt_status).toLowerCase() === 'returned' || String(selectedInvoice.sale_status).toLowerCase() === 'returned';
+
+          const isAlreadyPostedToFBR = !!(selectedInvoice.fbr_fiscal_number && String(selectedInvoice.fbr_fiscal_number).trim() !== 'Unposted');
+
           return (
             <div
               style={{ position: 'fixed', top: `${dropdownCoords.top - window.scrollY}px`, right: `${dropdownCoords.right}px` }}
@@ -267,25 +302,30 @@ const SalesHistory = () => {
               onClick={(e) => e.stopPropagation()}
             >
               <ul className="flex flex-col font-medium text-gray-700 dark:text-gray-300">
+                {!isAlreadyPostedToFBR && !isSelectedInvoiceReturned && (
+                  <li>
+                    <button
+                      type="button"
+                      disabled={syncingId === selectedInvoice.id}
+                      onClick={() => { setOpenActionId(null); handleSync(selectedInvoice); }}
+                      className="flex items-center gap-2.5 w-full px-4 py-2 hover:bg-gray-100 dark:hover:bg-meta-4 transition border-b border-stroke dark:border-strokedark text-success cursor-pointer font-bold disabled:opacity-50"
+                    >
+                      <FiSend size={13} /> {syncingId === selectedInvoice.id ? 'Posting...' : 'Post to FBR'}
+                    </button>
+                  </li>
+                )}
                 <li>
                   <button type="button" onClick={() => { setOpenActionId(null); navigate('/Sales-Return/Debit-Notes/Add', { state: { invoice: selectedInvoice } }); }} className="flex items-center gap-2.5 w-full px-4 py-2 hover:bg-gray-100 dark:hover:bg-meta-4 transition border-b border-stroke dark:border-strokedark text-blue-500 cursor-pointer">
                     <FiRotateCcw size={13} /> Sale Return
                   </button>
                 </li>
                 <li>
-                  <button disabled={!!selectedInvoice.fbr_fiscal_number} onClick={() => { setOpenActionId(null); navigate('/sales/invoice/add', { state: { invoice: selectedInvoice } }); }} className="flex items-center gap-2.5 w-full px-4 py-2 hover:bg-gray-100 dark:hover:bg-meta-4 transition text-yellow-600 disabled:opacity-30 cursor-pointer">
+                  <button onClick={() => { setOpenActionId(null); navigate('/sales/invoice/add', { state: { invoice: selectedInvoice } }); }} className="flex items-center gap-2.5 w-full px-4 py-2 hover:bg-gray-100 dark:hover:bg-meta-4 transition text-yellow-600 cursor-pointer">
                     <FiEdit size={13} /> Edit Record
                   </button>
                 </li>
-                {!selectedInvoice.fbr_fiscal_number && (
-                  <li>
-                    <button disabled={syncingId === selectedInvoice.id} onClick={() => { setOpenActionId(null); handleSync(selectedInvoice); }} className="flex items-center gap-2.5 w-full px-4 py-2 hover:bg-gray-100 dark:hover:bg-meta-4 transition text-primary font-bold cursor-pointer">
-                      <FiSend size={13} /> Post to FBR
-                    </button>
-                  </li>
-                )}
                 <li>
-                  <button disabled={!!selectedInvoice.fbr_fiscal_number} onClick={() => { setOpenActionId(null); handleDeleteInvoice(selectedInvoice.id); }} className="flex items-center gap-2.5 w-full px-4 py-2 hover:bg-gray-100 dark:hover:bg-meta-4 transition text-danger disabled:opacity-30 border-t border-stroke dark:border-strokedark mt-1 pt-1.5 cursor-pointer">
+                  <button onClick={() => { setOpenActionId(null); handleDeleteInvoice(selectedInvoice.id); }} className="flex items-center gap-2.5 w-full px-4 py-2 hover:bg-gray-100 dark:hover:bg-meta-4 transition text-danger border-t border-stroke dark:border-strokedark mt-1 pt-1.5 cursor-pointer">
                     <FiTrash2 size={13} /> Delete Record
                   </button>
                 </li>

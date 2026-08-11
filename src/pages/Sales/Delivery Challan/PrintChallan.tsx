@@ -3,7 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { supabase } from '../../../Context/supabaseClient';
 import { toast } from 'react-hot-toast';
 import Spinner from '../../../ui/Spinner';
-import { MdPrint, MdArrowBack } from 'react-icons/md';
+
 
 interface ChallanItem {
   pDescription: string;

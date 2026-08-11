@@ -49,7 +49,12 @@ const SaleReturnReceiptAdd = () => {
                     .from('sales_returns')
                     .select('id, original_invoice_no, customer_name, total_amount, total_net_amount, payout_amount_paid, return_status');
 
-                // 2. Fetch all existing receipts to dynamically aggregate them on the fly
+                // 2. Fetch sales_invoices to inspect cash_amount_paid
+                const { data: invoicesData } = await supabase
+                    .from('sales_invoices')
+                    .select('id, cash_amount_paid, payment_term, total_amount');
+
+                // 3. Fetch all existing receipts to dynamically aggregate them on the fly
                 const { data: allReceiptsData } = await supabase
                     .from('sales_return_receipts')
                     .select('sales_return_id, amount_paid');
@@ -61,32 +66,37 @@ const SaleReturnReceiptAdd = () => {
                 if (bankAccounts) setBanksList(bankAccounts);
 
                 if (returnsData) {
-                    // Map through returns and dynamically aggregate their associated receipts sum
                     const compiledReturnsPool = returnsData.map(r => {
+                        const invRefClean = String(r.original_invoice_no || '').replace('INV-', '').trim().toLowerCase();
+                        const matchedInv = (invoicesData || []).find(inv => String(inv.id).trim().toLowerCase() === invRefClean);
+
+                        const invoiceCashCollected = matchedInv ? Number(matchedInv.cash_amount_paid || 0) : 0;
+                        const trueNetItemsReturnVal = Number(r.total_net_amount || r.total_amount || 0);
+
+                        // Max cash refundable to customer cannot exceed cash actually collected for this invoice!
+                        const maxCashRefundablePool = Math.min(trueNetItemsReturnVal, invoiceCashCollected);
+
                         const associatedReceipts = (allReceiptsData || []).filter(rec => String(rec.sales_return_id) === String(r.id));
                         const totalReceiptsSum = associatedReceipts.reduce((sum, rec) => sum + Number(rec.amount_paid || 0), 0);
 
-                        // ✅ THE CRITICAL CALCULATION CURE: True total paid = original return cash + all receipts logged after it
                         const trueTotalAccumulatedPaid = Number(r.payout_amount_paid || 0) + totalReceiptsSum;
-                        const trueNetItemsReturnVal = Number(r.total_net_amount || r.total_amount || 0);
-                        const dynamicRemainingOwed = Math.max(0, trueNetItemsReturnVal - trueTotalAccumulatedPaid);
+                        const dynamicRemainingOwed = Math.max(0, maxCashRefundablePool - trueTotalAccumulatedPaid);
+
+                        const isSettledOrZeroCash = maxCashRefundablePool === 0 || dynamicRemainingOwed <= 0;
 
                         return {
                             ...r,
+                            max_refundable_pool: maxCashRefundablePool,
+                            invoice_cash_collected: invoiceCashCollected,
                             computed_total_paid: trueTotalAccumulatedPaid,
                             computed_remaining_due: dynamicRemainingOwed,
-                            // If remaining balance drops to 0, treat it as fully paid dynamically
-                            is_fully_settled: dynamicRemainingOwed <= 0
+                            is_fully_settled: isSettledOrZeroCash,
+                            statusBadge: maxCashRefundablePool === 0 ? 'CREDIT SETTLED (0 CASH OWED)' : (dynamicRemainingOwed <= 0 ? 'FULLY REFUNDED' : 'OPEN')
                         };
                     });
 
-                    // Only show rows that still have a remaining balance owed
-                    const eligibleReturns = compiledReturnsPool.filter(r =>
-                        !r.is_fully_settled || (isEditMode && String(r.id) === String(routeReceiptRow.sales_return_id))
-                    );
-
-                    setOnCreditReturns(eligibleReturns);
-                    setFilteredReturns(eligibleReturns.slice(0, 3));
+                    setOnCreditReturns(compiledReturnsPool);
+                    setFilteredReturns(compiledReturnsPool);
 
                     if (isEditMode && routeReceiptRow) {
                         const currentActiveReturn = compiledReturnsPool.find(r => String(r.id) === String(routeReceiptRow.sales_return_id));
@@ -253,29 +263,51 @@ const SaleReturnReceiptAdd = () => {
                                             {filteredReturns.length === 0 ? (
                                                 <div className="p-3 text-center text-xs text-gray-400 font-medium italic">No pending return options profiles.</div>
                                             ) : (
-                                                filteredReturns.map(r => (
-                                                    <div
-                                                        key={r.id}
-                                                        onClick={() => {
-                                                            setFieldValue('returnRowId', r.id);
-                                                            setFieldValue('invoiceNoRef', r.original_invoice_no);
-                                                            setFieldValue('customerName', r.customer_name);
-                                                            setFieldValue('remainingBalanceMax', r.computed_remaining_due);
-                                                            setSearchQuery(`${r.original_invoice_no} (${r.customer_name})`);
+                                                filteredReturns.map(r => {
+                                                    const isDisabled = r.is_fully_settled;
 
-                                                            // ✅ FIXED: Now reads the live computed remaining totals safely (e.g. drops from 40k to 30k instantly)
-                                                            setSelectedReturnDetails({
-                                                                totalAmount: Number(r.total_net_amount || r.total_amount || 0),
-                                                                alreadyPaid: Number(r.computed_total_paid),
-                                                                remainingDue: Number(r.computed_remaining_due)
-                                                            });
-                                                            setIsDropdownOpen(false);
-                                                        }}
-                                                        className="p-2.5 hover:bg-slate-100 dark:hover:bg-meta-4 cursor-pointer text-xs font-bold border-b border-stroke text-black dark:text-white"
-                                                    >
-                                                        📄 {r.original_invoice_no} - {r.customer_name} (Remaining Bal: Rs. {Number(r.computed_remaining_due).toLocaleString()})
-                                                    </div>
-                                                ))
+                                                    return (
+                                                        <div
+                                                            key={r.id}
+                                                            onClick={() => {
+                                                                if (isDisabled) {
+                                                                    toast.error(`Return note ${r.original_invoice_no} is ${r.statusBadge} and cannot be selected.`);
+                                                                    return;
+                                                                }
+
+                                                                setFieldValue('returnRowId', r.id);
+                                                                setFieldValue('invoiceNoRef', r.original_invoice_no);
+                                                                setFieldValue('customerName', r.customer_name);
+                                                                setFieldValue('remainingBalanceMax', r.computed_remaining_due);
+                                                                setSearchQuery(`${r.original_invoice_no} (${r.customer_name})`);
+
+                                                                setSelectedReturnDetails({
+                                                                    totalAmount: Number(r.total_net_amount || r.total_amount || 0),
+                                                                    alreadyPaid: Number(r.computed_total_paid),
+                                                                    remainingDue: Number(r.computed_remaining_due)
+                                                                });
+                                                                setIsDropdownOpen(false);
+                                                            }}
+                                                            className={`p-2.5 duration-100 flex justify-between items-center text-xs border-b border-stroke dark:border-strokedark last:border-0 ${
+                                                                isDisabled
+                                                                    ? 'bg-gray-100 dark:bg-meta-4/30 text-gray-400 dark:text-gray-500 cursor-not-allowed opacity-75'
+                                                                    : 'hover:bg-slate-100 dark:hover:bg-meta-4 cursor-pointer text-black dark:text-white font-bold'
+                                                            }`}
+                                                        >
+                                                            <div className="flex items-center gap-2">
+                                                                <span>📄 {r.original_invoice_no} - {r.customer_name}</span>
+                                                                {isDisabled && (
+                                                                    <span className="text-[9px] font-black uppercase tracking-wide bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300 px-1.5 py-0.5 rounded">
+                                                                        {r.statusBadge}
+                                                                    </span>
+                                                                )}
+                                                            </div>
+                                                            <span className="text-[10px] font-mono opacity-80 ml-2">
+                                                                {isDisabled ? `Rs. 0` : `Cash Owed: Rs. ${Number(r.computed_remaining_due).toLocaleString()}`}
+                                                            </span>
+                                                        </div>
+                                                    );
+                                                })
                                             )}
                                         </div>
                                     )}

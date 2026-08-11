@@ -5,7 +5,7 @@ import { supabase } from '../../../Context/supabaseClient';
 import { toast } from 'react-hot-toast';
 import Spinner from '../../../ui/Spinner';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { FiPlus, FiTrash2 } from 'react-icons/fi';
+import { FiTrash2 } from 'react-icons/fi';
 
 const NewInvoice = () => {
   const navigate = useNavigate();
@@ -30,17 +30,24 @@ const NewInvoice = () => {
         const { data: prod } = await supabase.from('products').select('product_name, current_stock, retail_price');
         const { data: sm } = await supabase.from('salesmen').select('id, name');
         const { data: trans } = await supabase.from('logistics_transportation').select('id, name');
+        const { data: locMaster } = await supabase.from('inventory_locations').select('name');
         const { data: wh } = await supabase.from('opening_stocks').select('location');
+        const { data: invWh } = await supabase.from('warehouse_inventory').select('warehouse_name');
         const { data: bnk } = await supabase.from('banks').select('id, bankName, accountTitle');
 
         if (cust) setCustomersList(cust);
         if (prod) setProductsList(prod);
         if (sm) setSalesmenList(sm);
         if (trans) setTransportList(trans);
-        if (wh) {
-          const uniqueLocations = Array.from(new Set(wh.map((w: any) => w.location).filter(Boolean)));
-          setWarehousesList(uniqueLocations);
-        }
+
+        const combinedLocs = [
+          ...(locMaster || []).map((l: any) => l.name),
+          ...(wh || []).map((w: any) => w.location),
+          ...(invWh || []).map((iw: any) => iw.warehouse_name)
+        ];
+        const uniqueLocations = Array.from(new Set(combinedLocs.map((loc: any) => String(loc || '').trim()).filter(Boolean)));
+        setWarehousesList(uniqueLocations);
+
         if (bnk) setBanksList(bnk);
       } catch (err: any) {
         toast.error('Failed to aggregate core infrastructure registries: ' + err.message);
@@ -122,8 +129,8 @@ const NewInvoice = () => {
       const { data: whStock, error } = await supabase
         .from('warehouse_inventory')
         .select('quantity')
-        .eq('product_name', selectedName)
-        .eq('warehouse_name', chosenWarehouse)
+        .ilike('product_name', selectedName)
+        .ilike('warehouse_name', chosenWarehouse)
         .maybeSingle();
 
       if (error) throw error;
@@ -220,7 +227,7 @@ const NewInvoice = () => {
                 if (invoiceError) throw invoiceError;
 
                 for (const item of values.items) {
-                  const { data: p } = await supabase.from('warehouse_inventory').select('id, quantity').eq('product_name', item.itemName).eq('warehouse_name', values.dispatchWarehouse).maybeSingle();
+                  const { data: p } = await supabase.from('warehouse_inventory').select('id, quantity').ilike('product_name', item.itemName).ilike('warehouse_name', values.dispatchWarehouse).maybeSingle();
                   if (p) await supabase.from('warehouse_inventory').update({ quantity: Number(p.quantity) - Number(item.qty) }).eq('id', p.id);
                 }
                 toast.success('Sales Invoice logged successfully!');
@@ -288,7 +295,7 @@ const NewInvoice = () => {
                   </div>
 
                   <div className="md:col-span-2">
-                    <label className="block font-bold text-primary mb-1">FBR Pakistan Statutory Transaction Scenario: *</label>
+                    <label className="block font-bold text-primary mb-1">Taxation & Sales Tax Statutory Transaction Scenario: *</label>
                     <select name="fbrScenario" value={values.fbrScenario} onChange={handleChange} className="w-full rounded border border-primary p-2 text-sm bg-white dark:bg-boxdark font-black text-primary outline-none">
                       <option value="Goods at Standard Rate to Registered Buyers">Goods at Standard Rate to Registered Buyers</option>
                       <option value="Goods at Standard Rate to Unregistered Buyers">Goods at Standard Rate to Unregistered Buyers (+4% Further Tax)</option>
@@ -354,8 +361,8 @@ const NewInvoice = () => {
                                     {hasItemError && <p className="text-red-500 text-[9px] font-bold mt-0.5">Required Field</p>}
                                   </td>
                                   <td className="p-2 text-center font-mono font-black text-success bg-success/5 text-xs w-[130px]">{Number(item.availableQty || 0).toLocaleString()}</td>
-                                  <td className="p-2"><input type="number" onKeyDown={blockInvalidChar} name={`items.${idx}.qty`} value={item.qty} onChange={handleChange} className={`w-full bg-transparent text-center font-bold text-primary outline-none border rounded p-1 ${hasAttempted && errors.items?.[idx] && (!item.qty || item.qty < 1) ? 'border-red-500 bg-red-50/10' : 'border-transparent'}`} /></td>
-                                  <td className="p-2"><input type="number" onKeyDown={blockInvalidChar} name={`items.${idx}.rp`} value={item.rp} onChange={handleChange} className={`w-full bg-transparent text-right font-bold outline-none border rounded p-1 ${hasAttempted && errors.items?.[idx] && (!item.rp || item.rp < 0) ? 'border-red-500 bg-red-50/10' : 'border-transparent'}`} /></td>
+                                  <td className="p-2"><input type="number" onKeyDown={blockInvalidChar} name={`items.${idx}.qty`} value={item.qty} onChange={handleChange} className={`w-full bg-transparent text-center font-bold text-primary outline-none border rounded p-1 ${hasAttempted && (errors.items as any)?.[idx] && (!item.qty || item.qty < 1) ? 'border-red-500 bg-red-50/10' : 'border-transparent'}`} /></td>
+                                  <td className="p-2"><input type="number" onKeyDown={blockInvalidChar} name={`items.${idx}.rp`} value={item.rp} onChange={handleChange} className={`w-full bg-transparent text-right font-bold outline-none border rounded p-1 ${hasAttempted && (errors.items as any)?.[idx] && (!item.rp || item.rp < 0) ? 'border-red-500 bg-red-50/10' : 'border-transparent'}`} /></td>
                                   <td className="p-2 text-center text-gray-400 font-sans">{fbr.activeGstRate}%</td>
                                   <td className="p-2 text-center text-gray-400 font-sans">{fbr.activeFTaxPer}%</td>
                                   <td className="p-2 text-right pr-2 text-gray-400">Rs. {fbr.gstAmt.toFixed(2)}</td>
@@ -377,14 +384,14 @@ const NewInvoice = () => {
                     <div>
                       <span className="font-bold text-gray-500 block mb-1">Counter Cash-Box Settlement Mode: *</span>
                       <select name="settlementMode" value={values.settlementMode} onChange={(e) => { handleChange(e); if (e.target.value === 'Cash') setFieldValue('selectedBankTitle', ''); }} className={`w-full border rounded p-2 text-xs bg-white dark:bg-boxdark font-black outline-none text-black dark:text-white ${hasAttempted && errors.settlementMode ? 'border-red-500 bg-red-50/10' : 'border-stroke dark:border-strokedark focus:border-primary'}`}><option value="Cash">By Cash</option><option value="Bank">By Bank (Online)</option></select>
-                      {hasAttempted && errors.settlementMode && <p className="text-red-500 text-[10px] font-bold mt-1">{errors.settlementMode}</p>}
+                      {hasAttempted && errors.settlementMode && <p className="text-red-500 text-[10px] font-bold mt-1">{String(errors.settlementMode)}</p>}
                     </div>
 
                     {values.settlementMode === 'Bank' && (
                       <div>
                         <span className="font-bold text-gray-500 block mb-1">Corporate Bank Ledger Profile: *</span>
                         <select name="selectedBankTitle" value={values.selectedBankTitle} onChange={handleChange} className={`w-full border rounded p-2 text-xs bg-white dark:bg-boxdark font-bold outline-none text-black dark:text-white ${hasAttempted && errors.selectedBankTitle ? 'border-red-500 bg-red-50/10' : 'border-stroke dark:border-strokedark focus:border-primary'}`}><option value="">-- Choose Account Wire Registry --</option>{banksList.map(b => <option key={b.id} value={b.accountTitle}>{b.bankName} - {b.accountTitle}</option>)}</select>
-                        {hasAttempted && errors.selectedBankTitle && <p className="text-red-500 text-[10px] font-bold mt-1">{errors.selectedBankTitle}</p>}
+                        {hasAttempted && errors.selectedBankTitle && <p className="text-red-500 text-[10px] font-bold mt-1">{String(errors.selectedBankTitle)}</p>}
                       </div>
                     )}
 

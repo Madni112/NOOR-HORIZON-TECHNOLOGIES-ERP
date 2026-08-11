@@ -30,11 +30,49 @@ function AddInvoiceReceipt() {
   useEffect(() => {
     const fetchReceiptMetadata = async () => {
       try {
-        const { data: invData } = await supabase.from('sales_invoices').select('id, customer_name, total_amount').order('id', { ascending: false });
+        const { data: invData } = await supabase.from('sales_invoices').select('id, customer_name, total_amount, receipt_status, cash_amount_paid').order('id', { ascending: false });
+        const { data: returnRecords } = await supabase.from('sales_returns').select('original_invoice_no, total_amount');
+        const { data: pastReceipts } = await supabase.from('financial_vouchers').select('id, original_invoice_no, total_amount').or('voucher_type.eq.Cash Receipt Voucher,voucher_type.eq.Bank Receipt Voucher');
         const { data: bankData } = await supabase.from('banks').select('id, bankName, accountTitle, accountNumber');
 
-        if (invData) setInvoiceOptions(invData);
         if (bankData) setBankAccounts(bankData);
+
+        if (invData) {
+          const currentEditId = editData?.id || null;
+          const processedInvoices = invData.map((inv: any) => {
+            const invIdStr = String(inv.id).trim().toLowerCase();
+            const isMarkedReturned = String(inv.receipt_status || '').toUpperCase() === 'RETURNED';
+
+            const matchedReturns = (returnRecords || []).filter((r: any) => {
+              const cleanRef = String(r.original_invoice_no || '').replace('INV-', '').trim().toLowerCase();
+              return cleanRef === invIdStr;
+            });
+            const sumReturns = matchedReturns.reduce((sum: number, r: any) => sum + (Number(r.total_amount) || 0), 0);
+
+            const matchedVouchers = (pastReceipts || []).filter((v: any) => {
+              if (isEditMode && v.id === currentEditId) return false;
+              const cleanRef = String(v.original_invoice_no || '').replace('INV-', '').trim().toLowerCase();
+              return cleanRef === invIdStr;
+            });
+            const sumVouchers = matchedVouchers.reduce((sum: number, v: any) => sum + (Number(v.total_amount) || 0), 0);
+
+            const initPaid = Number(inv.cash_amount_paid || 0);
+            const totalBilled = Number(inv.total_amount || 0);
+            const netRemaining = Math.max(0, totalBilled - initPaid - sumVouchers - sumReturns);
+
+            const isReturnedOrSettled = isMarkedReturned || sumReturns >= totalBilled || netRemaining <= 0.01;
+
+            return {
+              ...inv,
+              netRemaining,
+              sumReturns,
+              isReturnedOrSettled,
+              statusBadge: isMarkedReturned || sumReturns >= totalBilled ? 'RETURNED' : (netRemaining <= 0.01 ? 'FULLY SETTLED' : 'OPEN')
+            };
+          });
+
+          setInvoiceOptions(processedInvoices);
+        }
 
         if (isEditMode && editData) {
           setSelectedInvoiceId(String(editData.original_invoice_no));
@@ -79,6 +117,15 @@ function AddInvoiceReceipt() {
         return;
       }
 
+      if (String(invData.receipt_status || '').toUpperCase() === 'RETURNED') {
+        toast.error(`Cannot log receipt: Invoice #${invoiceId} is marked as RETURNED.`);
+        setSelectedInvoiceId('');
+        setCustomerName('');
+        setRemainingBalance(0);
+        values.amount = 0;
+        return;
+      }
+
       const netTotal = Number(invData.total_amount) || 0;
       setInvoiceTotal(netTotal);
 
@@ -90,20 +137,30 @@ function AddInvoiceReceipt() {
 
       const { data: returnRecords } = await supabase
         .from('sales_returns')
-        .select('total_net_amount')
-        .eq('original_invoice_no', String(invoiceId));
+        .select('total_amount')
+        .or(`original_invoice_no.eq.${invoiceId},original_invoice_no.eq.INV-${invoiceId}`);
 
       const totalReturnedValue = returnRecords
-        ? returnRecords.reduce((sum: number, r: any) => sum + (Number(r.total_net_amount) || 0), 0)
+        ? returnRecords.reduce((sum: number, r: any) => sum + (Number(r.total_amount) || 0), 0)
         : 0;
       setTotalReturnedCredit(totalReturnedValue);
 
       const initialInvoicePaymentsArray = invData.bankPayments || [];
-      const totalPaidAtSaleTime = initialInvoicePaymentsArray.reduce((sum: number, curr: any) => sum + (Number(curr.bankAmount) || 0), 0);
+      const totalPaidAtSaleTime = Number(invData.cash_amount_paid || 0) + initialInvoicePaymentsArray.reduce((sum: number, curr: any) => sum + (Number(curr.bankAmount) || 0), 0);
       const currentEditId = editData?.id || null;
       const totalPaidViaVouchers = pastReceipts ? pastReceipts.filter((r: any) => !isEditMode || r.id !== currentEditId).reduce((sum: number, r: any) => sum + (Number(r.total_amount) || 0), 0) : 0;
 
       const netRemaining = Math.max(0, netTotal - totalPaidAtSaleTime - totalPaidViaVouchers - totalReturnedValue);
+
+      if (netRemaining <= 0.01) {
+        toast.error(`Cannot log receipt: Invoice #${invoiceId} has no remaining balance (Fully settled/returned).`);
+        setSelectedInvoiceId('');
+        setCustomerName('');
+        setRemainingBalance(0);
+        values.amount = 0;
+        return;
+      }
+
       setRemainingBalance(netRemaining);
 
       setSelectedInvoiceId(String(invoiceId));
@@ -267,15 +324,38 @@ function AddInvoiceReceipt() {
                               {filteredInvoiceOptions.length === 0 ? (
                                 <div className="p-2 text-gray-400 text-center">No results located</div>
                               ) : (
-                                filteredInvoiceOptions.map((inv) => (
-                                  <div key={inv.id}
-                                    onClick={() => handleInstantSelect(String(inv.id), values)}
-                                    className="p-2 hover:bg-primary hover:text-white rounded cursor-pointer duration-100 flex justify-between items-center text-xs text-black dark:text-white dark:hover:text-white"
-                                  >
-                                    <span>INV-{String(inv.id).padStart(4, '0')} - {inv.customer_name}</span>
-                                    <span className="text-[10px] opacity-60 ml-2">Rs. {Number(inv.total_amount).toLocaleString()}</span>
-                                  </div>
-                                ))
+                                filteredInvoiceOptions.map((inv) => {
+                                  const isDisabled = inv.isReturnedOrSettled;
+
+                                  return (
+                                    <div key={inv.id}
+                                      onClick={() => {
+                                        if (isDisabled) {
+                                          toast.error(`Invoice #INV-${String(inv.id).padStart(4, '0')} is ${inv.statusBadge} and cannot be selected.`);
+                                          return;
+                                        }
+                                        handleInstantSelect(String(inv.id), values);
+                                      }}
+                                      className={`p-2 rounded duration-100 flex justify-between items-center text-xs border-b border-stroke dark:border-strokedark last:border-0 ${
+                                        isDisabled
+                                          ? 'bg-gray-100 dark:bg-meta-4/30 text-gray-400 dark:text-gray-500 cursor-not-allowed opacity-75'
+                                          : 'hover:bg-primary hover:text-white text-black dark:text-white cursor-pointer'
+                                      }`}
+                                    >
+                                      <div className="flex items-center gap-2">
+                                        <span>📄 INV-{String(inv.id).padStart(4, '0')} - {inv.customer_name}</span>
+                                        {isDisabled && (
+                                          <span className="text-[9px] font-black uppercase tracking-wide bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300 px-1.5 py-0.5 rounded">
+                                            {inv.statusBadge}
+                                          </span>
+                                        )}
+                                      </div>
+                                      <span className="text-[10px] font-mono opacity-80 ml-2">
+                                        {isDisabled ? `Rs. ${Number(inv.total_amount || 0).toLocaleString()}` : `Due: Rs. ${Number(inv.netRemaining || 0).toLocaleString()}`}
+                                      </span>
+                                    </div>
+                                  );
+                                })
                               )}
                             </div>
                           </div>

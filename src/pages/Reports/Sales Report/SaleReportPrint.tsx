@@ -124,7 +124,7 @@ const SaleReportPrint = () => {
         </div>
 
         <div className="text-center space-y-1 py-4 border-b border-double border-black">
-          <h1 className="text-xl font-black uppercase tracking-widest font-serif">AL-SYED SOFTWARE ERP LOGISTICS</h1>
+          <h1 className="text-xl font-black uppercase tracking-widest font-serif">SOFTHUB-PK ERP SOFTWARE</h1>
           <p className="text-[10px] font-bold tracking-wider text-gray-500 uppercase">Master Financial Audit Statement Workbook Ledger</p>
           <div className="text-[10px] pt-1 font-mono flex justify-between px-2 text-gray-600">
             <span>Report Categorization: <b className="text-black uppercase underline">{rType} Ledger Book</b></span>
@@ -168,7 +168,7 @@ const SaleReportPrint = () => {
                       {rType === 'sale' && <td className="p-1.5 border border-black font-sans text-purple-700 font-bold">{row.transport_name || 'Self Pick'}</td>}
                       <td className="p-1.5 border border-black text-center text-gray-500">{processingDateDisplay}</td>
                       <td className="p-2 border border-black text-center uppercase text-[10px] font-black">{activeStatusValue}</td>
-                      <td className="p-1.5 border border-black text-right pr-3 text-success font-black">Rs. {Number(row.total_amount || row.return_amount || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
+                      <td className="p-1.5 border border-black text-right pr-3 text-success font-black">Rs. {Number(row.total_amount || row.return_amount || row.payout_amount_paid || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
                     </tr>
                   );
                 })
@@ -178,7 +178,7 @@ const SaleReportPrint = () => {
               <tr className="bg-gray-50 border-t border-black font-black font-mono text-xs">
                 <td colSpan={rType === 'sale' ? 7 : 5} className="p-2 border border-black text-right uppercase tracking-wider text-gray-500">Gross Sheet Aggregated Balanced Sum (PKR):</td>
                 <td className="p-2 border border-black text-right pr-3 text-success underline decoration-double text-sm">
-                  Rs. {reportRows.reduce((sum, r) => sum + (Number(r.total_amount || r.return_amount || 0)), 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                  Rs. {reportRows.reduce((sum, r) => sum + (Number(r.total_amount || r.return_amount || r.payout_amount_paid || 0)), 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}
                 </td>
               </tr>
             </tfoot>

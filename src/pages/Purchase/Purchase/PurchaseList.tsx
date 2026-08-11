@@ -43,9 +43,25 @@ const PurchaseList = () => {
       
       if (targetRecord?.items) {
         for (const item of targetRecord.items) {
-          const { data: p } = await supabase.from('warehouse_inventory').select('id, quantity').eq('product_name', item.itemName).eq('warehouse_name', targetRecord.target_warehouse).maybeSingle();
-          if (p) {
-            await supabase.from('warehouse_inventory').update({ quantity: Math.max(0, Number(p.quantity) - Number(item.qty)) }).eq('id', p.id);
+          const qty = Number(item.qty || item.quantity || 0);
+          const pName = item.itemName || item.product_name;
+
+          if (pName) {
+            // 1. Decrease Master Product Stock (-)
+            const { data: prod } = await supabase.from('products').select('current_stock').ilike('product_name', pName).maybeSingle();
+            if (prod) {
+              const newStock = Math.max(0, (Number(prod.current_stock) || 0) - qty);
+              await supabase.from('products').update({ current_stock: newStock }).ilike('product_name', pName);
+            }
+
+            // 2. Decrease Target Location Warehouse Stock (-)
+            if (targetRecord.target_warehouse) {
+              const { data: p } = await supabase.from('warehouse_inventory').select('id, quantity').ilike('product_name', pName).ilike('warehouse_name', targetRecord.target_warehouse).maybeSingle();
+              if (p) {
+                const newWhStock = Math.max(0, (Number(p.quantity) || 0) - qty);
+                await supabase.from('warehouse_inventory').update({ quantity: newWhStock }).eq('id', p.id);
+              }
+            }
           }
         }
       }

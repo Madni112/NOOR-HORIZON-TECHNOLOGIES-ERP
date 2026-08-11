@@ -60,6 +60,7 @@ import SaleReturnReceiptAdd from '../pages/Sales/Sales Return Receipt/SalesRetur
 import PurchaseReportPrint from '../pages/Reports/Purchase Report/PurchaseReportPrint';
 import StockReportPrint from '../pages/Reports/Stock Report/StockReportPrint';
 import AccountReportPrint from '../pages/Reports/Account Report/AccountReportPrint';
+import BalanceSheet from '../pages/Reports/BalanceSheet';
 
 export const adminRoutes = [
   {
@@ -282,6 +283,12 @@ export const adminRoutes = [
         path: '/Reports/Account-Report',
         component: <AccountReport />,
 
+      },
+      {
+        label: 'Balance Sheet',
+        path: '/Reports/Balance-Sheet',
+        component: <BalanceSheet />,
+        icon: MdAccountBalance
       }
     ]
   },

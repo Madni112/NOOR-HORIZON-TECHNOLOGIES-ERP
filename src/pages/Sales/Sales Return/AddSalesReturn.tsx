@@ -11,7 +11,11 @@ const AddSalesReturn = () => {
   const location = useLocation();
 
   const routeStateData = location.state?.invoice || location.state?.item || location.state?.record || location.state?.returnRecord;
-  const isEditMode = !!routeStateData && (routeStateData.hasOwnProperty('return_status') || routeStateData.hasOwnProperty('original_invoice_no') || routeStateData.hasOwnProperty('total_amount'));
+  const isEditMode = !!routeStateData && (
+    routeStateData.hasOwnProperty('original_invoice_no') ||
+    routeStateData.hasOwnProperty('return_no') ||
+    routeStateData.hasOwnProperty('payout_amount_paid')
+  );
   const isDirectInvoiceLink = !!routeStateData && !isEditMode;
 
   const [loading, setLoading] = useState(false);
@@ -20,20 +24,24 @@ const AddSalesReturn = () => {
   const [filteredInvoices, setFilteredInvoices] = useState<any[]>([]);
   const [isInvoiceAlreadyReturned, setIsInvoiceAlreadyReturned] = useState(false);
   const [banksList, setBanksList] = useState<any[]>([]);
-  const [invoiceSearchQuery, setInvoiceSearchQuery] = useState('');
+  const [invoiceSearchQuery, setInvoiceSearchQuery] = useState(
+    isDirectInvoiceLink && routeStateData
+      ? `INV-${routeStateData.id} (${routeStateData.customer_name || ''})`
+      : (isEditMode && routeStateData ? `INV-${routeStateData.original_invoice_no?.replace('INV-', '')} (${routeStateData.customer_name || ''})` : '')
+  );
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const [isSelectionMade, setIsSelectionMade] = useState(isEditMode || isDirectInvoiceLink);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
   const [origInvoiceCashMetrics, setOrigInvoiceCashMetrics] = useState({
-    grandTotal: 0,
-    cashReceivedBox: 0
+    grandTotal: isDirectInvoiceLink && routeStateData ? Number(routeStateData.total_amount || 0) : 0,
+    cashReceivedBox: isDirectInvoiceLink && routeStateData ? Number(routeStateData.cash_amount_paid || 0) : 0
   });
 
   const [returnInitData, setReturnInitData] = useState<any>({
     returnNo: isEditMode ? `RTN-${String(routeStateData.id).padStart(4, '0')}` : '(Auto Generated)',
-    returnDate: routeStateData?.return_date || new Date().toISOString().split('T'),
-    invoiceIdRef: isEditMode ? routeStateData.original_invoice_no?.replace('INV-', '') : (isDirectInvoiceLink ? routeStateData.id : ''),
+    returnDate: routeStateData?.return_date || new Date().toISOString().split('T')[0],
+    invoiceIdRef: isEditMode ? routeStateData.original_invoice_no?.replace('INV-', '') : (isDirectInvoiceLink ? String(routeStateData.id) : ''),
     customerName: routeStateData?.customer_name || '',
     settlementMode: routeStateData?.settlement_mode || 'Cash',
     selectedBankAccountId: routeStateData?.linked_bank_title || '',
@@ -72,7 +80,10 @@ const AddSalesReturn = () => {
 
         if (isEditMode && routeStateData) {
           const extractedCleanInvoiceId = String(routeStateData.original_invoice_no || '').replace('INV-', '');
-          setInvoiceSearchQuery(String(routeStateData.original_invoice_no || ''));
+          const formattedInvText = extractedCleanInvoiceId
+            ? `INV-${extractedCleanInvoiceId}${routeStateData.customer_name ? ` (${routeStateData.customer_name})` : ''}`
+            : String(routeStateData.original_invoice_no || '');
+          setInvoiceSearchQuery(formattedInvText);
           setIsSelectionMade(true);
           setIsDropdownOpen(false);
 
@@ -97,7 +108,7 @@ const AddSalesReturn = () => {
             items: routeStateData.items || []
           });
         } else if (isDirectInvoiceLink && routeStateData) {
-          setInvoiceSearchQuery(`INV-${routeStateData.id} (${routeStateData.customer_name})`);
+          setInvoiceSearchQuery(`INV-${routeStateData.id} (${routeStateData.customer_name || ''})`);
           setIsSelectionMade(true);
           verifyInvoiceReturnStateGuard(routeStateData.id);
         }
@@ -211,8 +222,13 @@ const AddSalesReturn = () => {
               return acc + (base + (base / 100 * itemGst) + (base / 100 * itemFTax));
             }, 0);
 
-            const payoutAmountPaid = Number(values.payoutAmountPaid) || 0;
-            const finalCalculatedReturnStatus = payoutAmountPaid >= itemsTotalSum ? 'Paid' : 'On Credit';
+            const payoutAmountPaid = (values.invoiceIdRef && origInvoiceCashMetrics.cashReceivedBox === 0)
+              ? 0
+              : (Number(values.payoutAmountPaid) || 0);
+
+            const finalCalculatedReturnStatus = (values.invoiceIdRef && origInvoiceCashMetrics.cashReceivedBox === 0)
+              ? 'On Credit'
+              : (payoutAmountPaid >= itemsTotalSum ? 'Paid' : 'On Credit');
 
             const databasePayload = {
               original_invoice_no: `INV-${values.invoiceIdRef}`,
@@ -337,6 +353,23 @@ const AddSalesReturn = () => {
                   </div>
                 </div>
 
+                {values.invoiceIdRef && (
+                  <div className="mb-4 p-3 bg-blue-50 dark:bg-meta-4/20 border border-blue-200 dark:border-blue-800 rounded flex flex-wrap items-center justify-between gap-4 text-xs font-semibold text-black dark:text-white">
+                    <div>
+                      <span className="text-gray-500">Linked Invoice Ref:</span> <strong className="text-primary font-bold ml-1">INV-{String(values.invoiceIdRef).padStart(4, '0')}</strong>
+                    </div>
+                    <div>
+                      <span className="text-gray-500">Total Billed Invoice:</span> <strong className="text-black dark:text-white ml-1">Rs. {origInvoiceCashMetrics.grandTotal.toLocaleString(undefined, { minimumFractionDigits: 2 })}</strong>
+                    </div>
+                    <div>
+                      <span className="text-gray-500">Amount Received (Cash/Bank):</span> <strong className="text-success font-black ml-1">Rs. {origInvoiceCashMetrics.cashReceivedBox.toLocaleString(undefined, { minimumFractionDigits: 2 })}</strong>
+                    </div>
+                    <div>
+                      <span className="text-gray-500">Outstanding Credit Balance Due:</span> <strong className="text-danger font-black ml-1">Rs. {Math.max(0, origInvoiceCashMetrics.grandTotal - origInvoiceCashMetrics.cashReceivedBox).toLocaleString(undefined, { minimumFractionDigits: 2 })}</strong>
+                    </div>
+                  </div>
+                )}
+
                 <div className="w-full overflow-x-auto rounded-sm border border-stroke dark:border-strokedark mb-6 whitespace-nowrap">
                   <table className="w-full table-auto border-collapse text-[12px] min-w-[1200px]">
                     <thead>
@@ -422,15 +455,35 @@ const AddSalesReturn = () => {
                     <div className="border-t border-stroke dark:border-strokedark my-2"></div>
                     <div>
                       <h4 className="text-xs font-bold uppercase tracking-wider text-danger mb-2">2. Cash Payout Remitted Amount Paid (PKR): *</h4>
-                      <input
-                        type="number"
-                        name="payoutAmountPaid"
-                        onKeyDown={blockInvalidChar}
-                        onChange={handleChange}
-                        value={isEditMode && routeStateData ? routeStateData.payout_amount_paid : values.payoutAmountPaid}
-                        placeholder="Enter paid back amount..."
-                        className="w-full rounded border border-stroke p-2 bg-transparent text-right font-black text-danger text-sm focus:border-primary outline-none text-black dark:text-white"
-                      />
+                      
+                      {values.invoiceIdRef && origInvoiceCashMetrics.cashReceivedBox === 0 ? (
+                        <div className="p-3 bg-amber-50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-800/40 rounded text-[11px] text-amber-800 dark:text-amber-300 font-semibold space-y-1">
+                          <div className="flex items-center justify-between">
+                            <span className="font-bold uppercase tracking-wide text-danger text-xs">Cash Payout: Rs. 0.00</span>
+                            <span className="text-[9px] bg-amber-200 dark:bg-amber-900/50 text-amber-900 dark:text-amber-200 px-1.5 py-0.5 rounded font-black tracking-wider">CREDIT ADJUSTMENT ONLY</span>
+                          </div>
+                          <p className="text-[10px] leading-relaxed text-gray-600 dark:text-gray-400 font-normal">
+                            ℹ️ This invoice was billed <b>ON CREDIT</b> with <b>Rs. 0.00 cash received</b>. Cash payout is locked to <b>Rs. 0.00</b>. The return item value will automatically credit & adjust the customer's account ledger balance.
+                          </p>
+                        </div>
+                      ) : (
+                        <input
+                          type="number"
+                          name="payoutAmountPaid"
+                          onKeyDown={blockInvalidChar}
+                          onChange={(e) => {
+                            const val = Number(e.target.value) || 0;
+                            const maxLimit = values.invoiceIdRef && origInvoiceCashMetrics.cashReceivedBox > 0
+                              ? origInvoiceCashMetrics.cashReceivedBox
+                              : 9999999;
+                            const cappedVal = Math.min(val, maxLimit);
+                            setFieldValue('payoutAmountPaid', cappedVal);
+                          }}
+                          value={values.payoutAmountPaid}
+                          placeholder="Enter paid back amount..."
+                          className="w-full rounded border border-stroke p-2 bg-transparent text-right font-black text-danger text-sm focus:border-primary outline-none text-black dark:text-white"
+                        />
+                      )}
                     </div>
 
                   </div>
