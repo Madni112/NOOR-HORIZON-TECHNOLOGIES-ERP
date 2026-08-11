@@ -4,13 +4,14 @@ import { toast } from 'react-hot-toast';
 import Spinner from '../../../ui/Spinner';
 import { useNavigate } from 'react-router-dom';
 import { FiRotateCcw, FiEdit, FiSend, FiTrash2 } from 'react-icons/fi';
+import { buildFBRInvoicePayload, syncWithFBR } from '../../../service/fbrService';
 
 const SalesHistory = () => {
   const navigate = useNavigate();
   const [invoices, setInvoices] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
-  const [syncingId, setSyncingId] = useState<string | null>(null);
+  const [syncingId, setSyncingId] = useState<string | number | null>(null);
   const [openActionId, setOpenActionId] = useState<any | null>(null);
   const [dropdownCoords, setDropdownCoords] = useState({ top: 0, right: 0 });
   const [pageSize, setPageSize] = useState(10);
@@ -64,17 +65,27 @@ const SalesHistory = () => {
   const handleSync = async (invoice: any) => {
     setSyncingId(invoice.id);
     try {
-      const fakeFiscalNumber = `FBR-${Math.floor(100000 + Math.random() * 900000)}`;
+      const fbrPayload = buildFBRInvoicePayload(invoice);
+      const fbrRes = await syncWithFBR(fbrPayload, true);
+
+      if (!fbrRes || !fbrRes.fbrFiscalNumber) {
+        throw new Error('FBR API validation rejected the invoice payload.');
+      }
+
       const { error } = await supabase
         .from('sales_invoices')
-        .update({ fbr_fiscal_number: fakeFiscalNumber, fbr_qr_code: "fbr.gov.pk" })
+        .update({
+          fbr_fiscal_number: fbrRes.fbrFiscalNumber,
+          fbr_qr_code: fbrRes.fbrQrCode,
+          fbr_status: 'Posted'
+        })
         .eq('id', invoice.id);
 
       if (error) throw error;
-      toast.success('FBR Synced Successfully!');
+      toast.success(`FBR Synced Successfully! Code: ${fbrRes.fbrFiscalNumber}`);
       fetchInvoices();
     } catch (err: any) {
-      toast.error(err.message);
+      toast.error('FBR Sync Error: ' + err.message);
     } finally {
       setSyncingId(null);
     }
