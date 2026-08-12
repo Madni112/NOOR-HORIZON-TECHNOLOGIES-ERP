@@ -59,7 +59,7 @@ export const buildFBRInvoicePayload = (inv: any): FBRInvoicePayload => {
 
     return {
       hsCode: item.hsCode || item.hs_code || '8471.3000',
-      productDescription: item.itemName || item.product_name || item.name || 'General Item',
+      productDescription: item.itemName || item.product_name || item.name || 'Commercial Product',
       rate: `${gstRate}%`,
       uoM: item.uom || 'Numbers, pieces, units',
       quantity: qty,
@@ -78,20 +78,24 @@ export const buildFBRInvoicePayload = (inv: any): FBRInvoicePayload => {
     };
   });
 
+  const configuredSellerNTN = inv.seller_ntn || (typeof window !== 'undefined' && localStorage.getItem('fbr_seller_ntn')) || '';
+  const rawBuyerId = String(inv.buyer_ntn || inv.cnic || inv.ntn || '').trim();
+  const isRegisteredBuyer = rawBuyerId.length >= 7 && rawBuyerId !== '1000000000000';
+
   return {
     invoiceType: 'Sale Invoice',
     invoiceDate: inv.created_at ? new Date(inv.created_at).toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
-    sellerNTNCNIC: inv.seller_ntn || '7327556',
+    sellerNTNCNIC: configuredSellerNTN,
     sellerBusinessName: inv.seller_name || 'Softhub-PK ERP Systems',
     sellerProvince: inv.seller_province || 'Sindh',
     sellerAddress: inv.seller_address || 'Karachi, Pakistan',
-    buyerNTNCNIC: inv.buyer_ntn || inv.cnic || '1000000000000',
-    buyerBusinessName: inv.customer_name || 'General Client',
+    buyerNTNCNIC: isRegisteredBuyer ? rawBuyerId : '',
+    buyerBusinessName: inv.customer_name || 'Unregistered Customer',
     buyerProvince: inv.buyer_province || 'Sindh',
     buyerAddress: inv.buyer_address || 'Karachi',
-    buyerRegistrationType: inv.buyer_ntn ? 'Registered' : 'Unregistered',
+    buyerRegistrationType: isRegisteredBuyer ? 'Registered' : 'Unregistered',
     invoiceRefNo: '',
-    scenarioId: 'SN001',
+    scenarioId: isRegisteredBuyer ? 'SN001' : 'SN002',
     items: formattedItems
   };
 };
@@ -135,20 +139,24 @@ export const buildFBRReturnPayload = (ret: any): FBRInvoicePayload => {
     };
   });
 
+  const configuredSellerNTN = ret.seller_ntn || (typeof window !== 'undefined' && localStorage.getItem('fbr_seller_ntn')) || '';
+  const rawBuyerId = String(ret.buyer_ntn || ret.cnic || '').trim();
+  const isRegisteredBuyer = rawBuyerId.length >= 7 && rawBuyerId !== '1000000000000';
+
   return {
     invoiceType: 'Debit Note',
     invoiceDate: ret.return_date || new Date().toISOString().split('T')[0],
-    sellerNTNCNIC: ret.seller_ntn || '7327556',
+    sellerNTNCNIC: configuredSellerNTN,
     sellerBusinessName: ret.seller_name || 'Softhub-PK ERP Systems',
     sellerProvince: ret.seller_province || 'Sindh',
     sellerAddress: ret.seller_address || 'Karachi, Pakistan',
-    buyerNTNCNIC: ret.buyer_ntn || '1000000000000',
-    buyerBusinessName: ret.customer_name || 'General Client',
+    buyerNTNCNIC: isRegisteredBuyer ? rawBuyerId : '',
+    buyerBusinessName: ret.customer_name || 'Unregistered Customer',
     buyerProvince: ret.buyer_province || 'Sindh',
     buyerAddress: ret.buyer_address || 'Karachi',
-    buyerRegistrationType: ret.buyer_ntn ? 'Registered' : 'Unregistered',
-    invoiceRefNo: cleanInvRef ? `7327556DI${cleanInvRef.padStart(16, '0')}` : '7327556DI1744111990654',
-    scenarioId: 'SN001',
+    buyerRegistrationType: isRegisteredBuyer ? 'Registered' : 'Unregistered',
+    invoiceRefNo: cleanInvRef ? `${configuredSellerNTN}DI${cleanInvRef.padStart(16, '0')}` : '',
+    scenarioId: isRegisteredBuyer ? 'SN001' : 'SN002',
     items: formattedItems
   };
 };
@@ -179,9 +187,14 @@ export const syncWithFBR = async (payload: FBRInvoicePayload, isSandbox: boolean
       let parsedErr = errorText;
       try {
         const jsonErr = JSON.parse(errorText);
-        parsedErr = jsonErr.message || jsonErr.error || JSON.stringify(jsonErr);
+        parsedErr = jsonErr.validationResponse?.error || jsonErr.message || jsonErr.error || JSON.stringify(jsonErr);
       } catch (_) {}
-      throw new Error(`FBR Gateway Error (${response.status}): ${parsedErr || 'Invalid API Token or Unauthorized access.'}`);
+
+      if (parsedErr?.includes('seller registration number') || parsedErr?.includes('0401') || response.status === 401) {
+        throw new Error('FBR Authorization Error (401): The Seller NTN/CNIC in your invoice does not match the NTN/CNIC registered on your FBR Iris Security Token (3abdd5c9...).');
+      }
+
+      throw new Error(`FBR Gateway Error (${response.status}): ${parsedErr}`);
     }
 
     const data = await response.json();
@@ -201,6 +214,11 @@ export const syncWithFBR = async (payload: FBRInvoicePayload, isSandbox: boolean
     } else {
       const errCode = valResp?.statusCode || 'VAL_ERR';
       const errMsg = valResp?.error || valResp?.invoiceStatuses?.[0]?.error || 'Invoice payload failed FBR validation checks.';
+      
+      if (errCode === '0401' || errMsg?.includes('seller registration number')) {
+        throw new Error('FBR Authorization Error (401): Seller NTN/CNIC does not match the NTN/CNIC registered on your FBR Iris Bearer Token.');
+      }
+      
       throw new Error(`FBR Validation Error [${errCode}]: ${errMsg}`);
     }
   } catch (err: any) {
