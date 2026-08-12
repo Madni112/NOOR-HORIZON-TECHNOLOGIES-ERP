@@ -187,7 +187,7 @@ export const buildFBRReturnPayload = (ret: any): FBRInvoicePayload => {
     buyerProvince: ret.buyer_province || 'Sindh',
     buyerAddress: ret.buyer_address || 'Karachi',
     buyerRegistrationType: isRegisteredBuyer ? 'Registered' : 'Unregistered',
-    invoiceRefNo: cleanInvRef ? `${configuredSellerNTN}DI${cleanInvRef.padStart(16, '0')}` : '',
+    invoiceRefNo: ret.original_fbr_fiscal_number || ret.fbr_fiscal_number || (cleanInvRef ? `${configuredSellerNTN}DI${cleanInvRef.padStart(16, '0')}` : ''),
     scenarioId: scenarioInfo.scenarioId,
     items: formattedItems
   };
