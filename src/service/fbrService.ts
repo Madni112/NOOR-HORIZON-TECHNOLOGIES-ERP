@@ -197,7 +197,13 @@ export const syncWithFBR = async (payload: FBRInvoicePayload, isSandbox: boolean
       throw new Error(`FBR Gateway Error (${response.status}): ${parsedErr}`);
     }
 
-    const data = await response.json();
+    const rawText = await response.text();
+    let data: any = {};
+    try {
+      data = JSON.parse(rawText);
+    } catch (_) {
+      throw new Error(`FBR Server Raw Response Error: ${rawText.slice(0, 200)}`);
+    }
 
     // Check FBR Validation Status
     const valResp = data.validationResponse;
