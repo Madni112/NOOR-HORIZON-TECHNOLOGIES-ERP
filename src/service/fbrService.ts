@@ -78,7 +78,7 @@ export const buildFBRInvoicePayload = (inv: any): FBRInvoicePayload => {
     };
   });
 
-  const configuredSellerNTN = inv.seller_ntn || (typeof window !== 'undefined' && localStorage.getItem('fbr_seller_ntn')) || '';
+  const configuredSellerNTN = inv.seller_ntn || (typeof window !== 'undefined' && localStorage.getItem('fbr_seller_ntn')) || '4130686580237';
   const rawBuyerId = String(inv.buyer_ntn || inv.cnic || inv.ntn || '').trim();
   const isRegisteredBuyer = rawBuyerId.length >= 7 && rawBuyerId !== '1000000000000';
 
@@ -139,7 +139,7 @@ export const buildFBRReturnPayload = (ret: any): FBRInvoicePayload => {
     };
   });
 
-  const configuredSellerNTN = ret.seller_ntn || (typeof window !== 'undefined' && localStorage.getItem('fbr_seller_ntn')) || '';
+  const configuredSellerNTN = ret.seller_ntn || (typeof window !== 'undefined' && localStorage.getItem('fbr_seller_ntn')) || '4130686580237';
   const rawBuyerId = String(ret.buyer_ntn || ret.cnic || '').trim();
   const isRegisteredBuyer = rawBuyerId.length >= 7 && rawBuyerId !== '1000000000000';
 
