@@ -123,7 +123,7 @@ export const buildFBRInvoicePayload = (inv: any): FBRInvoicePayload => {
     buyerProvince: inv.buyer_province || 'Sindh',
     buyerAddress: inv.buyer_address || 'Karachi',
     buyerRegistrationType: isRegisteredBuyer ? 'Registered' : 'Unregistered',
-    invoiceRefNo: '',
+    invoiceRefNo: String(inv.invoice_no || inv.invoiceNo || inv.id || ''),
     scenarioId: scenarioInfo.scenarioId,
     items: formattedItems
   };
