@@ -154,9 +154,14 @@ export const buildFBRReturnPayload = (ret: any): FBRInvoicePayload => {
 };
 
 /**
- * Sends Invoice or Debit Note Payload to FBR DI System
+ * Sends Invoice or Debit Note Payload to FBR DI System.
+ * Throws explicit error messages for network issues, HTTP failures, or FBR validation rejections.
  */
 export const syncWithFBR = async (payload: FBRInvoicePayload, isSandbox: boolean = true) => {
+  if (typeof window !== 'undefined' && !navigator.onLine) {
+    throw new Error('Offline Error: Internet connection lost. Please reconnect and try posting again.');
+  }
+
   const targetUrl = isSandbox ? FBR_SANDBOX_URL : FBR_PRODUCTION_URL;
 
   try {
@@ -169,29 +174,39 @@ export const syncWithFBR = async (payload: FBRInvoicePayload, isSandbox: boolean
       body: JSON.stringify(payload)
     });
 
-    if (response.ok) {
-      const data = await response.json();
-      if (data.validationResponse?.statusCode === '00' || data.invoiceNumber) {
-        return {
-          success: true,
-          fbrFiscalNumber: data.invoiceNumber || `FBR-${Math.floor(100000000 + Math.random() * 900000000)}`,
-          fbrQrCode: `FBR_DI_VERIFIED|${data.invoiceNumber || payload.invoiceRefNo}|${payload.sellerNTNCNIC}|${payload.invoiceDate}`,
-          rawResponse: data
-        };
-      }
+    if (!response.ok) {
+      const errorText = await response.text();
+      let parsedErr = errorText;
+      try {
+        const jsonErr = JSON.parse(errorText);
+        parsedErr = jsonErr.message || jsonErr.error || JSON.stringify(jsonErr);
+      } catch (_) {}
+      throw new Error(`FBR Gateway Error (${response.status}): ${parsedErr || 'Invalid API Token or Unauthorized access.'}`);
     }
-  } catch (err) {
-    console.warn('FBR API Server unreachable, fallback to fiscal generator:', err);
+
+    const data = await response.json();
+
+    // Check FBR Validation Status
+    const valResp = data.validationResponse;
+    const isSuccess = valResp?.statusCode === '00' || valResp?.status === 'Valid' || !!data.invoiceNumber;
+
+    if (isSuccess && (data.invoiceNumber || payload.invoiceRefNo)) {
+      const finalInvoiceNo = data.invoiceNumber || payload.invoiceRefNo;
+      return {
+        success: true,
+        fbrFiscalNumber: finalInvoiceNo,
+        fbrQrCode: `FBR_DI_VERIFIED|${finalInvoiceNo}|${payload.sellerNTNCNIC}|${payload.invoiceDate}`,
+        rawResponse: data
+      };
+    } else {
+      const errCode = valResp?.statusCode || 'VAL_ERR';
+      const errMsg = valResp?.error || valResp?.invoiceStatuses?.[0]?.error || 'Invoice payload failed FBR validation checks.';
+      throw new Error(`FBR Validation Error [${errCode}]: ${errMsg}`);
+    }
+  } catch (err: any) {
+    if (err.name === 'TypeError' || err.message?.includes('Failed to fetch') || err.message?.includes('NetworkError')) {
+      throw new Error('FBR Server Unreachable: Network request to https://gw.fbr.gov.pk was blocked or offline.');
+    }
+    throw err;
   }
-
-  // Robust Fallback Fiscal Code Generator for Offline / Sandbox Simulation
-  const randomSuffix = Math.floor(1000000000000 + Math.random() * 9000000000000);
-  const simulatedFiscalNumber = `70000${payload.invoiceType === 'Debit Note' ? 'DN' : 'DI'}${randomSuffix}`;
-
-  return {
-    success: true,
-    fbrFiscalNumber: simulatedFiscalNumber,
-    fbrQrCode: `FBR_DI_VERIFIED|${simulatedFiscalNumber}|${payload.sellerNTNCNIC}|${payload.invoiceDate}`,
-    simulated: true
-  };
 };
