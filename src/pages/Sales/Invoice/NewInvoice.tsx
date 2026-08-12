@@ -120,6 +120,7 @@ const NewInvoice = () => {
     }
     setFieldValue(`items.${index}.itemName`, matchingProduct.product_name);
     setFieldValue(`items.${index}.rp`, Number(matchingProduct.retail_price) || 0);
+    setFieldValue(`items.${index}.hsCode`, matchingProduct.hs_code || matchingProduct.hscode || matchingProduct.hsCodeNo || matchingProduct.hs_Code || '');
 
     if (!chosenWarehouse) {
       setFieldValue(`items.${index}.availableQty`, 0);

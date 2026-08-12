@@ -40,11 +40,40 @@ export interface FBRInvoicePayload {
 const FBR_SANDBOX_URL = 'https://gw.fbr.gov.pk/di_data/v1/di/postinvoicedata_sb';
 const FBR_PRODUCTION_URL = 'https://gw.fbr.gov.pk/di_data/v1/di/postinvoicedata';
 
+const mapFBRScenario = (scenarioStr: string, isRegistered: boolean) => {
+  const s = String(scenarioStr || '').toLowerCase();
+  if (s.includes('3rd schedule')) {
+    return { scenarioId: 'SN008', saleType: '3rd Schedule Goods' };
+  }
+  if (s.includes('reduced')) {
+    return { scenarioId: 'SN005', saleType: 'Reduced rate goods' };
+  }
+  if (s.includes('exempt')) {
+    return { scenarioId: 'SN006', saleType: 'Exempt goods' };
+  }
+  if (s.includes('zero rated')) {
+    return { scenarioId: 'SN007', saleType: 'Zero rated goods' };
+  }
+  if (s.includes('sro 297')) {
+    return { scenarioId: 'SN004', scenarioIdText: 'SN004', saleType: 'Goods listed in SRO 297(1)/2023' };
+  }
+  if (s.includes('unregistered')) {
+    return { scenarioId: 'SN002', saleType: 'Goods at standard rate (default)' };
+  }
+  if (isRegistered) {
+    return { scenarioId: 'SN001', saleType: 'Goods at standard rate (default)' };
+  }
+  return { scenarioId: 'SN002', saleType: 'Goods at standard rate (default)' };
+};
+
 /**
  * Transforms an ERP Sales Invoice into FBR DI API v1.12 Payload Format
  */
 export const buildFBRInvoicePayload = (inv: any): FBRInvoicePayload => {
   const invoiceItems = inv.items || inv.products || [];
+  const rawBuyerId = String(inv.buyer_ntn || inv.cnic || inv.ntn || '').trim();
+  const isRegisteredBuyer = rawBuyerId.length >= 7 && rawBuyerId !== '1000000000000';
+  const scenarioInfo = mapFBRScenario(inv.scenario_type || inv.fbrScenario, isRegisteredBuyer);
 
   const formattedItems: FBRItemPayload[] = invoiceItems.map((item: any) => {
     const qty = Number(item.qty || item.quantity || 1);
@@ -57,8 +86,10 @@ export const buildFBRInvoicePayload = (inv: any): FBRInvoicePayload => {
     const furtherTaxAmount = (baseExcl * fTax) / 100;
     const totalItemValue = baseExcl + salesTaxAmount + furtherTaxAmount;
 
+    const extractedHsCode = String(item.hsCode || item.hs_code || item.hsCodeNo || item.hscode || item.hs_Code || item.hsNo || '').trim();
+
     return {
-      hsCode: String(item.hsCode || item.hs_code || item.hsCodeNo || item.hscode || '3306.1010').trim(),
+      hsCode: extractedHsCode,
       productDescription: item.itemName || item.product_name || item.name || 'Commercial Product',
       rate: `${gstRate}%`,
       uoM: item.uom || 'Numbers, pieces, units',
@@ -73,14 +104,12 @@ export const buildFBRInvoicePayload = (inv: any): FBRInvoicePayload => {
       sroScheduleNo: '',
       fedPayable: 0,
       discount: Number(item.discount || 0),
-      saleType: 'Goods at standard rate (default)',
+      saleType: scenarioInfo.saleType,
       sroItemSerialNo: ''
     };
   });
 
   const configuredSellerNTN = inv.seller_ntn || (typeof window !== 'undefined' && localStorage.getItem('fbr_seller_ntn')) || '4130686580237';
-  const rawBuyerId = String(inv.buyer_ntn || inv.cnic || inv.ntn || '').trim();
-  const isRegisteredBuyer = rawBuyerId.length >= 7 && rawBuyerId !== '1000000000000';
 
   return {
     invoiceType: 'Sale Invoice',
@@ -95,7 +124,7 @@ export const buildFBRInvoicePayload = (inv: any): FBRInvoicePayload => {
     buyerAddress: inv.buyer_address || 'Karachi',
     buyerRegistrationType: isRegisteredBuyer ? 'Registered' : 'Unregistered',
     invoiceRefNo: '',
-    scenarioId: isRegisteredBuyer ? 'SN001' : 'SN002',
+    scenarioId: scenarioInfo.scenarioId,
     items: formattedItems
   };
 };
@@ -106,6 +135,9 @@ export const buildFBRInvoicePayload = (inv: any): FBRInvoicePayload => {
 export const buildFBRReturnPayload = (ret: any): FBRInvoicePayload => {
   const returnItems = ret.items || [];
   const cleanInvRef = String(ret.original_invoice_no || '').replace('INV-', '').trim();
+  const rawBuyerId = String(ret.buyer_ntn || ret.cnic || '').trim();
+  const isRegisteredBuyer = rawBuyerId.length >= 7 && rawBuyerId !== '1000000000000';
+  const scenarioInfo = mapFBRScenario(ret.scenario_type || ret.fbrScenario, isRegisteredBuyer);
 
   const formattedItems: FBRItemPayload[] = returnItems.map((item: any) => {
     const qty = Number(item.qty || item.returnedQty || 1);
@@ -118,8 +150,10 @@ export const buildFBRReturnPayload = (ret: any): FBRInvoicePayload => {
     const furtherTaxAmount = (baseExcl * fTax) / 100;
     const totalItemValue = baseExcl + salesTaxAmount + furtherTaxAmount;
 
+    const extractedHsCode = String(item.hsCode || item.hs_code || item.hsCodeNo || item.hscode || item.hs_Code || item.hsNo || '').trim();
+
     return {
-      hsCode: String(item.hsCode || item.hs_code || item.hsCodeNo || item.hscode || '3306.1010').trim(),
+      hsCode: extractedHsCode,
       productDescription: item.itemName || item.product_name || 'Returned Product',
       rate: `${gstRate}%`,
       uoM: item.uom || 'Numbers, pieces, units',
@@ -134,14 +168,12 @@ export const buildFBRReturnPayload = (ret: any): FBRInvoicePayload => {
       sroScheduleNo: '',
       fedPayable: 0,
       discount: 0,
-      saleType: 'Goods at standard rate (default)',
+      saleType: scenarioInfo.saleType,
       sroItemSerialNo: ''
     };
   });
 
   const configuredSellerNTN = ret.seller_ntn || (typeof window !== 'undefined' && localStorage.getItem('fbr_seller_ntn')) || '4130686580237';
-  const rawBuyerId = String(ret.buyer_ntn || ret.cnic || '').trim();
-  const isRegisteredBuyer = rawBuyerId.length >= 7 && rawBuyerId !== '1000000000000';
 
   return {
     invoiceType: 'Debit Note',
@@ -156,7 +188,7 @@ export const buildFBRReturnPayload = (ret: any): FBRInvoicePayload => {
     buyerAddress: ret.buyer_address || 'Karachi',
     buyerRegistrationType: isRegisteredBuyer ? 'Registered' : 'Unregistered',
     invoiceRefNo: cleanInvRef ? `${configuredSellerNTN}DI${cleanInvRef.padStart(16, '0')}` : '',
-    scenarioId: isRegisteredBuyer ? 'SN001' : 'SN002',
+    scenarioId: scenarioInfo.scenarioId,
     items: formattedItems
   };
 };
