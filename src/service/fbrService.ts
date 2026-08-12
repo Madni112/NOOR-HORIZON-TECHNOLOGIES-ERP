@@ -81,7 +81,7 @@ export const buildFBRInvoicePayload = (inv: any): FBRInvoicePayload => {
   return {
     invoiceType: 'Sale Invoice',
     invoiceDate: inv.created_at ? new Date(inv.created_at).toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
-    sellerNTNCNIC: inv.seller_ntn || '0786909',
+    sellerNTNCNIC: inv.seller_ntn || '7327556',
     sellerBusinessName: inv.seller_name || 'Softhub-PK ERP Systems',
     sellerProvince: inv.seller_province || 'Sindh',
     sellerAddress: inv.seller_address || 'Karachi, Pakistan',
@@ -138,7 +138,7 @@ export const buildFBRReturnPayload = (ret: any): FBRInvoicePayload => {
   return {
     invoiceType: 'Debit Note',
     invoiceDate: ret.return_date || new Date().toISOString().split('T')[0],
-    sellerNTNCNIC: ret.seller_ntn || '0786909',
+    sellerNTNCNIC: ret.seller_ntn || '7327556',
     sellerBusinessName: ret.seller_name || 'Softhub-PK ERP Systems',
     sellerProvince: ret.seller_province || 'Sindh',
     sellerAddress: ret.seller_address || 'Karachi, Pakistan',
