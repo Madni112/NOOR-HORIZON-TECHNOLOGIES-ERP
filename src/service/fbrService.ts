@@ -58,7 +58,7 @@ export const buildFBRInvoicePayload = (inv: any): FBRInvoicePayload => {
     const totalItemValue = baseExcl + salesTaxAmount + furtherTaxAmount;
 
     return {
-      hsCode: item.hsCode || item.hs_code || '8471.3000',
+      hsCode: String(item.hsCode || item.hs_code || item.hsCodeNo || item.hscode || '3306.1010').trim(),
       productDescription: item.itemName || item.product_name || item.name || 'Commercial Product',
       rate: `${gstRate}%`,
       uoM: item.uom || 'Numbers, pieces, units',
@@ -119,7 +119,7 @@ export const buildFBRReturnPayload = (ret: any): FBRInvoicePayload => {
     const totalItemValue = baseExcl + salesTaxAmount + furtherTaxAmount;
 
     return {
-      hsCode: item.hsCode || item.hs_code || '8471.3000',
+      hsCode: String(item.hsCode || item.hs_code || item.hsCodeNo || item.hscode || '3306.1010').trim(),
       productDescription: item.itemName || item.product_name || 'Returned Product',
       rate: `${gstRate}%`,
       uoM: item.uom || 'Numbers, pieces, units',
