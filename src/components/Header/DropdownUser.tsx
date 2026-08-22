@@ -2,13 +2,14 @@ import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import ClickOutside from '../ClickOutside';
 import { LuLogOut } from 'react-icons/lu';
+import { MdPerson } from 'react-icons/md';
 import { useAuth } from '../../Context/Auth';
-import defaultUserImg from '../../images/logo/authenFace.png';
 
 const DropdownUser = () => {
   const { logout } = useAuth();
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const [profile, setProfile] = useState<any>();
+  const [imageError, setImageError] = useState(false);
 
   useEffect(() => {
     const user = localStorage.getItem('user');
@@ -33,14 +34,18 @@ const DropdownUser = () => {
           <span className="block text-xs">{profile && profile.role}</span>
         </span>
 
-        <img
-          className="w-10 h-10 border object-contain rounded-full bg-slate-100 dark:bg-slate-800 p-0.5"
-          src={profile?.image || defaultUserImg}
-          onError={(e) => {
-            e.currentTarget.src = defaultUserImg;
-          }}
-          alt="User"
-        />
+        {profile?.image && !imageError ? (
+          <img
+            className="w-9 h-9 border object-cover rounded-full"
+            src={profile.image}
+            onError={() => setImageError(true)}
+            alt="User"
+          />
+        ) : (
+          <div className="w-9 h-9 rounded-full bg-primary/10 text-primary dark:bg-primary/20 flex items-center justify-center font-bold border border-primary/20 shadow-sm">
+            <MdPerson size={20} />
+          </div>
+        )}
 
         <svg
           className="hidden fill-current sm:block"
