@@ -4,11 +4,14 @@ import { supabase } from '../../../Context/supabaseClient';
 import { toast } from 'react-hot-toast'; 
 import Spinner from '../../../ui/Spinner'; 
 import { FiEdit, FiTrash2 } from 'react-icons/fi';
+import { useAuth } from '../../../Context/Auth';
 
 const CustomerHistory = () => { 
+  const { tenantId } = useAuth();
   const [customers, setCustomers] = useState<any[]>([]); 
   const [loading, setLoading] = useState(true); 
   const navigate = useNavigate(); 
+
 
   // Datatable search and pagination trackers
   const [searchTerm, setSearchTerm] = useState('');
@@ -75,12 +78,13 @@ const CustomerHistory = () => {
       <div className="flex justify-between items-center mb-6"> 
         <h4 className="text-xl font-semibold text-black dark:text-white">Customer Database</h4> 
         <button 
-          onClick={() => navigate('/customers/customer-details')} 
-          className="bg-primary text-white py-2 px-4 rounded text-sm font-medium hover:bg-opacity-90 transition" 
+          onClick={() => navigate(`${tenantId ? `/${tenantId}` : ''}/Customers/customer-details`)} 
+          className="bg-primary text-white py-2 px-4 rounded text-sm font-medium hover:bg-opacity-90 transition cursor-pointer shadow-sm" 
         > 
-          + Add New 
+          + Add New Customer
         </button> 
       </div> 
+
 
       {/* Datatable Filter Control Header Line */}
       <div className="flex flex-col sm:flex-row justify-between items-center gap-4 mb-4">
@@ -140,29 +144,31 @@ const CustomerHistory = () => {
                       <p className="text-xs text-gray-500 dark:text-gray-400">{c.company || 'Private Customer'}</p> 
                     </td> 
                     <td className="py-3.5 px-4 text-sm"> 
-                      <p className="text-black dark:text-white">NTN: {c.ntnNo || 'N/A'}</p> 
-                      <p className="text-xs text-gray-500 dark:text-gray-400">CNIC: {c.cnicNo || 'N/A'}</p> 
+                      <p className="text-black dark:text-white font-mono text-xs">NTN: {c.ntnNo || 'N/A'}</p> 
+                      {c.stRegNo && <p className="text-[11px] text-primary font-mono font-semibold">STRN: {c.stRegNo}</p>}
+                      <p className="text-xs text-gray-500 dark:text-gray-400 font-mono">CNIC: {c.cnicNo || 'N/A'}</p> 
                     </td> 
                     <td className="py-3.5 px-4 text-sm text-black dark:text-white"><p>{c.primaryPhone || 'N/A'}</p></td> 
                     <td className="py-3.5 px-4 text-sm text-black dark:text-white"><p>{c.province || 'N/A'}</p></td> 
                     <td className="py-3.5 px-4 text-sm"> 
                       <div className="flex items-center justify-center space-x-3.5"> 
                         <button 
-                          onClick={() => navigate('/customers/customer-details', { state: { customer: c } })} 
-                          className="text-gray-500 hover:text-primary transition p-0.5" 
+                          onClick={() => navigate(`${tenantId ? `/${tenantId}` : ''}/Customers/customer-details`, { state: { customer: c } })} 
+                          className="text-gray-500 hover:text-primary transition p-0.5 cursor-pointer" 
                           title="Edit Customer" 
                         > 
                           <FiEdit size={16} />
                         </button> 
                         <button 
                           onClick={() => handleDelete(c.id)} 
-                          className="text-gray-500 hover:text-danger transition p-0.5" 
+                          className="text-gray-500 hover:text-danger transition p-0.5 cursor-pointer" 
                           title="Delete Customer" 
                         > 
                           <FiTrash2 size={16} />
                         </button> 
                       </div> 
                     </td> 
+
                   </tr> 
                 );
               }) 

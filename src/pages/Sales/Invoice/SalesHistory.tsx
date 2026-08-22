@@ -3,12 +3,15 @@ import { supabase } from '../../../Context/supabaseClient';
 import { toast } from 'react-hot-toast';
 import Spinner from '../../../ui/Spinner';
 import { useNavigate } from 'react-router-dom';
-import { FiRotateCcw, FiEdit, FiSend, FiTrash2 } from 'react-icons/fi';
+import { FiRotateCcw, FiEdit, FiSend, FiTrash2, FiPrinter } from 'react-icons/fi';
 import { buildFBRInvoicePayload, syncWithFBR } from '../../../service/fbrService';
+import { useAuth } from '../../../Context/Auth';
 
 const SalesHistory = () => {
   const navigate = useNavigate();
+  const { tenantId } = useAuth();
   const [invoices, setInvoices] = useState<any[]>([]);
+
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [syncingId, setSyncingId] = useState<string | number | null>(null);
@@ -324,11 +327,23 @@ const SalesHistory = () => {
                     </button>
                   </li>
                 )}
+                {isAlreadyPostedToFBR && (
+                  <li>
+                    <button
+                      type="button"
+                      onClick={() => { setOpenActionId(null); navigate(`${tenantId ? `/${tenantId}` : ''}/sales/invoice/print/${selectedInvoice.id}`); }}
+                      className="flex items-center gap-2.5 w-full px-4 py-2 hover:bg-gray-100 dark:hover:bg-meta-4 transition border-b border-stroke dark:border-strokedark text-primary cursor-pointer font-bold"
+                    >
+                      <FiPrinter size={13} /> Print Invoice
+                    </button>
+                  </li>
+                )}
                 <li>
-                  <button type="button" onClick={() => { setOpenActionId(null); navigate('/Sales-Return/Debit-Notes/Add', { state: { invoice: selectedInvoice } }); }} className="flex items-center gap-2.5 w-full px-4 py-2 hover:bg-gray-100 dark:hover:bg-meta-4 transition border-b border-stroke dark:border-strokedark text-blue-500 cursor-pointer">
+                  <button type="button" onClick={() => { setOpenActionId(null); navigate(`${tenantId ? `/${tenantId}` : ''}/Sales-Return/Debit-Notes/Add`, { state: { invoice: selectedInvoice } }); }} className="flex items-center gap-2.5 w-full px-4 py-2 hover:bg-gray-100 dark:hover:bg-meta-4 transition border-b border-stroke dark:border-strokedark text-blue-500 cursor-pointer">
                     <FiRotateCcw size={13} /> Sale Return
                   </button>
                 </li>
+
                 <li>
                   <button onClick={() => { setOpenActionId(null); navigate('/sales/invoice/add', { state: { invoice: selectedInvoice } }); }} className="flex items-center gap-2.5 w-full px-4 py-2 hover:bg-gray-100 dark:hover:bg-meta-4 transition text-yellow-600 cursor-pointer">
                     <FiEdit size={13} /> Edit Record

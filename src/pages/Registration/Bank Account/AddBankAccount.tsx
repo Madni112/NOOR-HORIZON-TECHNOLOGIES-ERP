@@ -5,8 +5,10 @@ import * as Yup from 'yup';
 import { supabase } from '../../../Context/supabaseClient';
 import { toast } from 'react-hot-toast';
 import Spinner from '../../../ui/Spinner';
+import { useAuth } from '../../../Context/Auth';
 
 const AddBank = () => {
+    const { tenantId } = useAuth();
     const [loading, setLoading] = useState(false);
     const location = useLocation();
     const navigate = useNavigate();
@@ -63,13 +65,34 @@ const AddBank = () => {
                     .update(values)
                     .eq('id', editData.id);
                 if (error) throw error;
+
+                // Sync update in Chart of Accounts
+                await supabase
+                    .from('chart_of_accounts')
+                    .update({
+                        account_code: values.accountNumber.trim(),
+                        account_title: `${values.bankName.trim()} (A/C: ${values.accountNumber.trim()})`,
+                    })
+                    .eq('linked_bank_id', String(editData.id));
+
                 toast.success('Account Details Updated Successfully!');
-                navigate('/Registration/Bank-Account/BankAccountList');
+                navigate(`${tenantId ? `/${tenantId}` : ''}/Registration/Bank-Account/BankAccountList`);
             } else {
-                const { error } = await supabase.from('banks').insert([values]);
+                const { data: insertedBank, error } = await supabase.from('banks').insert([values]).select('id').single();
                 if (error) throw error;
+
+                // Auto-create corresponding Asset ledger in Chart of Accounts
+                await supabase.from('chart_of_accounts').insert([{
+                    account_code: values.accountNumber.trim(),
+                    account_title: `${values.bankName.trim()} (A/C: ${values.accountNumber.trim()})`,
+                    category_code: 'Current Assets',
+                    control_code: 'Bank',
+                    linked_bank_id: String(insertedBank?.id || ''),
+                    notes: `Auto-linked bank ledger for ${values.accountTitle}`
+                }]);
+
                 toast.success('Bank Account Registered Successfully!');
-                navigate('/Registration/Bank-Account/BankAccountList');
+                navigate(`${tenantId ? `/${tenantId}` : ''}/Registration/Bank-Account/BankAccountList`);
             }
         } catch (err: any) {
             toast.error(err.message);
@@ -77,6 +100,7 @@ const AddBank = () => {
             setLoading(false);
         }
     };
+
 
 
     return (

@@ -4,11 +4,14 @@ import { supabase } from '../../../Context/supabaseClient';
 import { toast } from 'react-hot-toast';
 import Spinner from '../../../ui/Spinner';
 import { MdPrint, MdArrowBack } from 'react-icons/md';
+import { useAuth } from '../../../Context/Auth';
 
 const StockReportPrint = () => {
     const location = useLocation();
     const navigate = useNavigate();
+    const { businessName, tenantId } = useAuth();
     const [loading, setLoading] = useState(true);
+
     const [reportRows, setReportRows] = useState<any[]>([]);
 
     const config = location.state || { tab: 1, filters: {} };
@@ -402,13 +405,14 @@ const StockReportPrint = () => {
 
             <div className="print-root-container w-full bg-white p-4 space-y-6">
                 <div className="flex justify-between items-center bg-gray-100 p-3 rounded border print-hidden-element print:hidden">
-                    <button type="button" onClick={() => navigate('/Reports/Stock-Report')} className="flex items-center gap-1.5 font-bold hover:underline cursor-pointer"><MdArrowBack size={16} /> Return to Auditing Center</button>
+                    <button type="button" onClick={() => navigate(`${tenantId ? `/${tenantId}` : ''}/Reports/Stock-Report`)} className="flex items-center gap-1.5 font-bold hover:underline cursor-pointer"><MdArrowBack size={16} /> Return to Auditing Center</button>
                     <button type="button" onClick={() => window.print()} className="flex items-center gap-1.5 bg-primary text-white py-1.5 px-5 rounded font-black cursor-pointer hover:bg-opacity-90 transition shadow-sm"><MdPrint size={16} /> Print Workbook Report</button>
                 </div>
 
                 <div className="text-center space-y-1 py-4 border-b border-double border-black">
-                    <h1 className="text-xl font-black uppercase tracking-widest font-serif">SOFTHUB-PK ERP SOFTWARE</h1>
+                    <h1 className="text-xl font-black uppercase tracking-widest font-serif">{businessName ? businessName.toUpperCase() : 'NOOR HORIZON TECHNOLOGIES ERP'}</h1>
                     <p className="text-[10px] font-bold tracking-wider text-gray-500 uppercase">Master Dynamic Inventory Valuation & Real-Time Stock Balance Ledger</p>
+
                     <div className="text-[10px] pt-1 font-mono flex justify-between px-2 text-gray-600">
                         <span>Workbook Subtype: <b className="text-black uppercase underline">
                             {activeTab === 1 && 'Stock Activity Report'}
@@ -784,9 +788,21 @@ const StockReportPrint = () => {
                     )}
                 </div>
 
-                <div className="mt-36 pt-16 grid grid-cols-2 gap-20 text-center text-[10px] font-sans font-bold uppercase tracking-wider text-gray-400">
+                <div className="mt-24 grid grid-cols-2 gap-20 text-center text-[10px] font-sans font-bold uppercase tracking-wider text-gray-400">
                     <div className="border-t border-black pt-2">Warehouse Master Count Verifier</div>
                     <div className="border-t border-black pt-2">Corporate Internal Management Audit Release</div>
+                </div>
+
+                {/* 🏢 Software & Corporate Provider Footer */}
+                <div className="mt-12 pt-3 border-t border-gray-300 flex justify-between items-center text-[10px] text-gray-600 font-sans print:border-gray-400">
+                    <div className="flex items-center gap-2 font-bold">
+                        <span className="text-black font-black uppercase">{businessName ? `${businessName.toUpperCase()} • ` : ''}NOOR HORIZON TECHNOLOGIES</span>
+                        <span className="text-gray-400">|</span>
+                        <span className="text-gray-700">Contact: <b className="text-black font-bold">03128039911</b></span>
+                    </div>
+                    <div className="text-[9px] text-gray-400 font-mono">
+                        System Generated Report • Soft-Hub ERP
+                    </div>
                 </div>
             </div>
         </div>
@@ -794,3 +810,4 @@ const StockReportPrint = () => {
 };
 
 export default StockReportPrint;
+

@@ -49,10 +49,10 @@ const SaleReturnReceiptAdd = () => {
                     .from('sales_returns')
                     .select('id, original_invoice_no, customer_name, total_amount, total_net_amount, payout_amount_paid, return_status');
 
-                // 2. Fetch sales_invoices to inspect cash_amount_paid
+                // 2. Fetch sales_invoices to inspect cash and bank collected payments
                 const { data: invoicesData } = await supabase
                     .from('sales_invoices')
-                    .select('id, cash_amount_paid, payment_term, total_amount');
+                    .select('id, cash_amount_paid, bank_amount, bankPayments, payment_term, total_amount');
 
                 // 3. Fetch all existing receipts to dynamically aggregate them on the fly
                 const { data: allReceiptsData } = await supabase
@@ -70,11 +70,13 @@ const SaleReturnReceiptAdd = () => {
                         const invRefClean = String(r.original_invoice_no || '').replace('INV-', '').trim().toLowerCase();
                         const matchedInv = (invoicesData || []).find(inv => String(inv.id).trim().toLowerCase() === invRefClean);
 
-                        const invoiceCashCollected = matchedInv ? Number(matchedInv.cash_amount_paid || 0) : 0;
+                        const upfrontCash = Number(matchedInv?.cash_amount_paid || 0);
+                        const upfrontBank = Number(matchedInv?.bank_amount || 0) + (Array.isArray(matchedInv?.bankPayments) ? matchedInv.bankPayments.reduce((sum: number, b: any) => sum + (Number(b.bankAmount) || 0), 0) : 0);
+                        const invoiceTotalCollected = upfrontCash + upfrontBank;
                         const trueNetItemsReturnVal = Number(r.total_net_amount || r.total_amount || 0);
 
-                        // Max cash refundable to customer cannot exceed cash actually collected for this invoice!
-                        const maxCashRefundablePool = Math.min(trueNetItemsReturnVal, invoiceCashCollected);
+                        // Max cash/bank refundable to customer cannot exceed payments actually collected for this invoice!
+                        const maxCashRefundablePool = Math.min(trueNetItemsReturnVal, invoiceTotalCollected);
 
                         const associatedReceipts = (allReceiptsData || []).filter(rec => String(rec.sales_return_id) === String(r.id));
                         const totalReceiptsSum = associatedReceipts.reduce((sum, rec) => sum + Number(rec.amount_paid || 0), 0);
@@ -87,16 +89,19 @@ const SaleReturnReceiptAdd = () => {
                         return {
                             ...r,
                             max_refundable_pool: maxCashRefundablePool,
-                            invoice_cash_collected: invoiceCashCollected,
+                            invoice_cash_collected: invoiceTotalCollected,
                             computed_total_paid: trueTotalAccumulatedPaid,
                             computed_remaining_due: dynamicRemainingOwed,
                             is_fully_settled: isSettledOrZeroCash,
-                            statusBadge: maxCashRefundablePool === 0 ? 'CREDIT SETTLED (0 CASH OWED)' : (dynamicRemainingOwed <= 0 ? 'FULLY REFUNDED' : 'OPEN')
+                            statusBadge: maxCashRefundablePool === 0 
+                                ? 'CREDIT SETTLED (0 CASH OWED)' 
+                                : (dynamicRemainingOwed <= 0 ? 'FULLY REFUNDED' : `OPEN (Rs. ${dynamicRemainingOwed.toFixed(2)} DUE)`)
                         };
                     });
 
                     setOnCreditReturns(compiledReturnsPool);
                     setFilteredReturns(compiledReturnsPool);
+
 
                     if (isEditMode && routeReceiptRow) {
                         const currentActiveReturn = compiledReturnsPool.find(r => String(r.id) === String(routeReceiptRow.sales_return_id));
@@ -172,7 +177,11 @@ const SaleReturnReceiptAdd = () => {
         amountPaid: Yup.number()
             .typeError('Must be a number')
             .required('Required')
-            .min(1, 'Min 1')
+            .min(0.01, 'Min 0.01')
+            .test('max-due', 'Amount exceeds remaining balance owed', function (val) {
+                const max = this.parent.remainingBalanceMax;
+                return val === undefined || max === undefined || val <= max + 0.01;
+            })
     });
 
     const blockInvalidChar = (e: React.KeyboardEvent<HTMLInputElement>) =>
@@ -194,6 +203,7 @@ const SaleReturnReceiptAdd = () => {
                     initialValues={initialFormValues}
                     validationSchema={validationSchema}
                     enableReinitialize={true}
+
                     onSubmit={async (values) => {
                         try {
                             setLoading(true);
@@ -341,22 +351,36 @@ const SaleReturnReceiptAdd = () => {
 
                                 <div className="md:col-span-2">
                                     <label className="block font-bold text-danger mb-1">Remitted Cash Back Amount Paid (PKR): *</label>
-                                    <input type="number" name="amountPaid" value={values.amountPaid} onKeyDown={blockInvalidChar} onChange={handleChange} placeholder="Type payment..." className={`w-full rounded border p-2 bg-transparent text-right font-black text-danger text-sm focus:border-primary outline-none text-black dark:text-white ${hasAttempted && errors.amountPaid ? 'border-red-500 bg-red-50' : 'border-stroke'}`} />
+                                    <input
+                                        type="number"
+                                        name="amountPaid"
+                                        value={values.amountPaid}
+                                        onKeyDown={blockInvalidChar}
+                                        onChange={(e) => {
+                                            const val = Number(e.target.value) || 0;
+                                            const maxLimit = values.remainingBalanceMax ?? selectedReturnDetails.remainingDue ?? 999999;
+                                            const finalVal = Math.min(val, maxLimit);
+                                            setFieldValue('amountPaid', finalVal);
+                                        }}
+                                        placeholder="Type payment..."
+                                        className={`w-full rounded border p-2 bg-transparent text-right font-black text-danger text-sm focus:border-primary outline-none text-black dark:text-white ${hasAttempted && errors.amountPaid ? 'border-red-500 bg-red-50' : 'border-stroke'}`}
+                                    />
                                     {hasAttempted && errors.amountPaid && <p className="text-red-500 font-bold text-[10px] mt-1">⚠️ {String(errors.amountPaid)}</p>}
                                 </div>
 
                                 {values.returnRowId && (
                                     <div className="md:col-span-4 bg-gray-50 dark:bg-meta-4/20 p-3 rounded border border-stroke dark:border-strokedark font-mono text-[11px] grid grid-cols-3 text-center text-gray-500 dark:text-white">
-                                        <div>Total Return Value: <b className="block text-xs text-black dark:text-white">Rs. {Number(selectedReturnDetails.totalAmount).toLocaleString()}</b></div>
-                                        <div>Already Refunded: <b className="block text-xs text-success">Rs. {Number(selectedReturnDetails.alreadyPaid).toLocaleString()}</b></div>
+                                        <div>Total Return Value: <b className="block text-xs text-black dark:text-white">Rs. {Number(selectedReturnDetails.totalAmount || 0).toFixed(2)}</b></div>
+                                        <div>Already Refunded: <b className="block text-xs text-success">Rs. {Number(selectedReturnDetails.alreadyPaid || 0).toFixed(2)}</b></div>
                                         <div>
-                                            Remaining Return Cash Owed:
+                                            Outstanding Refund Due:
                                             <b className="block text-xs text-danger font-black">
-                                                Rs. {Math.max(0, Number(selectedReturnDetails.remainingDue) - Number(values.amountPaid || 0)).toLocaleString()}
+                                                Rs. {Number(selectedReturnDetails.remainingDue || 0).toFixed(2)}
                                             </b>
                                         </div>
                                     </div>
                                 )}
+
 
                                 <div className="md:col-span-4 pt-4 mt-2 border-t border-stroke dark:border-strokedark flex justify-between items-center bg-gray-50 dark:bg-meta-4/5 p-4 rounded-sm">
                                     <button type="button" onClick={() => navigate('/sales/sales-return-receipt/list')} className="rounded border border-stroke dark:border-strokedark py-2 px-10 font-semibold text-sm text-black dark:text-white hover:bg-gray-100 transition cursor-pointer">Cancel</button>

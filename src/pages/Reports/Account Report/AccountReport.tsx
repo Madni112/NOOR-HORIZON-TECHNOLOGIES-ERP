@@ -3,10 +3,13 @@ import { useNavigate } from 'react-router-dom';
 import { supabase } from '../../../Context/supabaseClient';
 import { toast } from 'react-hot-toast';
 import Spinner from '../../../ui/Spinner';
+import { useAuth } from '../../../Context/Auth';
 
 const AccountReport = () => {
   const navigate = useNavigate();
+  const { tenantId } = useAuth();
   const [loading, setLoading] = useState(true);
+
   const [activeTab, setActiveTab] = useState<number>(1);
 
   const [customers, setCustomers] = useState<any[]>([]);
@@ -137,10 +140,11 @@ const AccountReport = () => {
   };
 
   const handleDispatchReportView = () => {
-    navigate('/Reports/Account-Report/Print', {
+    navigate(`${tenantId ? `/${tenantId}` : ''}/Reports/Account-Report/Print`, {
       state: { tab: activeTab, criteria: filters }
     });
   };
+
 
   if (loading) return <div className="flex h-48 items-center justify-center"><Spinner /></div>;
 

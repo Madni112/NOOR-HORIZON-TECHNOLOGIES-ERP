@@ -4,10 +4,13 @@ import { supabase } from '../../../Context/supabaseClient';
 import { toast } from 'react-hot-toast';
 import Spinner from '../../../ui/Spinner';
 import { MdEdit, MdDelete, MdPrint } from 'react-icons/md';
+import { useAuth } from '../../../Context/Auth';
 
 const DeliveryChallanHistory = () => {
   const navigate = useNavigate();
+  const { tenantId } = useAuth();
   const [challans, setChallans] = useState<any[]>([]);
+
   const [loading, setLoading] = useState(true);
 
   // Datatable layout state controllers
@@ -155,14 +158,14 @@ const DeliveryChallanHistory = () => {
                     <td className="py-3.5 px-4 text-sm">
                       <div className="flex items-center justify-center space-x-3">
                         <button
-                          onClick={() => navigate(`/Delivery-Challan/Print/${c.id}`)}
+                          onClick={() => navigate(`${tenantId ? `/${tenantId}` : ''}/Delivery-Challan/Print/${c.id}`)}
                           className="text-gray-500 hover:text-secondary transition p-0.5"
                           title="Print Gate Pass Receipt"
                         >
                           <MdPrint size={18} />
                         </button>
                         <button
-                          onClick={() => navigate('/Delivery-Challan/Details', { state: { challan: c } })}
+                          onClick={() => navigate(`${tenantId ? `/${tenantId}` : ''}/Delivery-Challan/Details`, { state: { challan: c } })}
                           className="text-gray-500 hover:text-primary transition p-0.5"
                           title="Edit Document"
                         >

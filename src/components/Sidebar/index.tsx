@@ -1,17 +1,22 @@
 import React, { useRef, useState, useEffect } from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
 import SidebarLinkGroup from './SidebarLinkGroup';
-import { AiOutlineUp, AiOutlineDown, AiOutlineRight } from 'react-icons/ai';
+import { AiOutlineUp, AiOutlineDown, AiOutlineRight, AiOutlineArrowLeft } from 'react-icons/ai';
 import { LuLogOut } from 'react-icons/lu';
 import { useModal } from '../../Context/Modal';
 import { useAuth } from '../../Context/Auth';
+import LogoDark from '../../images/logo/logo-dark.png';
+import LogoLight from '../../images/logo/logo-light.png';
+import IconDark from '../../images/logo/icon-dark.png';
+import IconLight from '../../images/logo/icon-light.png';
+import { Weight } from 'lucide-react';
 
 interface SidebarProps {
   sidebarOpen: boolean;
   setSidebarOpen: (arg: boolean) => void;
 }
 
-const FlyoutSubMenu = ({ item, pathname, handleLinkClick }: any) => {
+const FlyoutSubMenu = ({ item, pathname, handleLinkClick, getTenantPath }: any) => {
   const [showSubFlyout, setShowSubFlyout] = useState(false);
 
   if (item.children) {
@@ -39,6 +44,7 @@ const FlyoutSubMenu = ({ item, pathname, handleLinkClick }: any) => {
                   item={child}
                   pathname={pathname}
                   handleLinkClick={handleLinkClick}
+                  getTenantPath={getTenantPath}
                 />
               ))}
             </ul>
@@ -48,13 +54,16 @@ const FlyoutSubMenu = ({ item, pathname, handleLinkClick }: any) => {
     );
   }
 
+  const destination = (item.path && getTenantPath ? getTenantPath(item.path) : item.path) || '#';
+
   return (
     <li>
       <NavLink
-        to={item.path}
+        to={destination}
         onClick={handleLinkClick}
-        className={`flex items-center gap-2 rounded px-3 py-1.5 text-xs font-medium duration-150 hover:bg-gray-100 dark:hover:bg-meta-4 ${pathname === item.path ? 'text-primary bg-gray-50' : 'text-textColor dark:text-white'
-          }`}
+        className={`flex items-center gap-2 rounded px-3 py-1.5 text-xs font-medium duration-150 hover:bg-gray-100 dark:hover:bg-meta-4 ${
+          pathname === destination || pathname === item.path ? 'text-primary bg-gray-50' : 'text-textColor dark:text-white'
+        }`}
       >
         {item.label}
       </NavLink>
@@ -62,7 +71,7 @@ const FlyoutSubMenu = ({ item, pathname, handleLinkClick }: any) => {
   );
 };
 
-const SidebarItem = ({ item, pathname, depth = 0, sidebarOpen, setSidebarOpen, hideModal, openMenuId, setOpenMenuId, menuUniqueKey }: any) => {
+const SidebarItem = ({ item, pathname, depth = 0, sidebarOpen, setSidebarOpen, hideModal, openMenuId, setOpenMenuId, menuUniqueKey, getTenantPath }: any) => {
   const itemRef = useRef<HTMLDivElement>(null);
   const [windowWidth, setWindowWidth] = useState(window.innerWidth);
   const [showFlyout, setShowFlyout] = useState(false);
@@ -70,29 +79,33 @@ const SidebarItem = ({ item, pathname, depth = 0, sidebarOpen, setSidebarOpen, h
 
   // Helper check: Recursively verifies if any nested children match the active route URL
   const checkHasActiveChild = (routeItem: any): boolean => {
-    if (routeItem.label?.toLowerCase() === 'administration' && pathname.toLowerCase().includes('/administration/')) {
-      return true;
-    }
-    if (routeItem.label?.toLowerCase() === 'registration' && pathname.toLowerCase().includes('/registration/')) {
-      return true;
-    }
-    if (routeItem.label?.toLowerCase() === 'sales' && (
-      pathname.toLowerCase().includes('/sales/') ||
-      pathname.toLowerCase().includes('/sales-return/') ||
-      pathname.toLowerCase().includes('/delivery-challan/')
-    )) {
-      return true;
-    }
+    if (!routeItem) return false;
+    if (!routeItem.children || !Array.isArray(routeItem.children)) return false;
 
-    if (!routeItem.children) return false;
     return routeItem.children.some((child: any) => {
-      if (child.path === pathname) return true;
+      const dest = child.path && getTenantPath ? getTenantPath(child.path) : child.path;
+      const cleanChildPath = String(child.path || '').toLowerCase();
+      const cleanDest = String(dest || '').toLowerCase();
+      const cleanPathname = String(pathname || '').toLowerCase();
+
+      if (cleanChildPath && (cleanPathname === cleanChildPath || cleanPathname === cleanDest)) return true;
+
+      // Match sub-routes (e.g., /Add, /Edit, /Print, /customer-details) of this child
+      const baseChild = cleanChildPath.replace(/\/(list|customer-details|add)$/i, '');
+      if (baseChild && baseChild.length > 2 && cleanPathname.includes(baseChild)) {
+        return true;
+      }
+
       if (child.children) return checkHasActiveChild(child);
       return false;
     });
   };
 
-  const isChildActive = checkHasActiveChild(item) || pathname === item.path;
+
+  const itemDestination = item?.path && getTenantPath ? getTenantPath(item.path) : (item?.path || '');
+  const isChildActive = checkHasActiveChild(item) || Boolean(item?.path && (pathname === item.path || pathname === itemDestination));
+
+
 
   // Local toggle state initializes accurately based on the active path to support hard refreshes
   const [open, setOpen] = useState(isChildActive);
@@ -221,6 +234,7 @@ const SidebarItem = ({ item, pathname, depth = 0, sidebarOpen, setSidebarOpen, h
                         openMenuId={openMenuId}
                         setOpenMenuId={setOpenMenuId}
                         menuUniqueKey={`${menuUniqueKey}-${idx}`}
+                        getTenantPath={getTenantPath}
                       />
                     ))}
                   </ul>
@@ -249,7 +263,7 @@ const SidebarItem = ({ item, pathname, depth = 0, sidebarOpen, setSidebarOpen, h
             </div>
             <ul className="flex flex-col gap-1">
               {item.children.map((child: any, idx: number) => (
-                <FlyoutSubMenu key={idx} item={child} pathname={pathname} handleLinkClick={handleLinkClick} />
+                <FlyoutSubMenu key={idx} item={child} pathname={pathname} handleLinkClick={handleLinkClick} getTenantPath={getTenantPath} />
               ))}
             </ul>
           </div>
@@ -258,12 +272,15 @@ const SidebarItem = ({ item, pathname, depth = 0, sidebarOpen, setSidebarOpen, h
     );
   }
 
+  const singleDestination = (item.path && getTenantPath ? getTenantPath(item.path) : item.path) || '#';
+
   return (
     <li onClick={handleLinkClick} className="w-full" title={!shouldShowLabels ? item.label : undefined}>
       <NavLink
-        to={item.path}
-        className={`group relative flex items-center rounded-sm py-2.5 font-medium duration-300 ease-in-out hover:bg-[#E0E5F2] dark:text-white dark:hover:bg-meta-4 ${isHighlighted ? 'text-blue-800 dark:text-primary bg-[#E0E5F2]/40 font-bold' : 'text-textColor'
-          } ${shouldShowLabels ? 'px-4 justify-start' : 'justify-center mx-auto w-10 h-10 px-0'}`}
+        to={singleDestination}
+        className={`group relative flex items-center rounded-sm py-2.5 font-medium duration-300 ease-in-out hover:bg-[#E0E5F2] dark:text-white dark:hover:bg-meta-4 ${
+          (item.path && (pathname === singleDestination || pathname === item.path)) ? 'text-blue-800 dark:text-primary bg-[#E0E5F2]/40 font-bold' : 'text-textColor'
+        } ${shouldShowLabels ? 'px-4 justify-start' : 'justify-center mx-auto w-10 h-10 px-0'}`}
         style={{ paddingLeft: shouldShowLabels ? `${(depth + 1) * 1.2}rem` : undefined }}
       >
         {item.icon && <item.icon className="text-xl shrink-0" />}
@@ -274,13 +291,28 @@ const SidebarItem = ({ item, pathname, depth = 0, sidebarOpen, setSidebarOpen, h
 };
 
 const Sidebar = ({ sidebarOpen, setSidebarOpen }: SidebarProps) => {
-  const { getRoleBasedRoutes, logout } = useAuth();
+  const { getRoleBasedRoutes, logout, tenantId } = useAuth();
   const roleRoutes = getRoleBasedRoutes();
   const location = useLocation();
   const { hideModal } = useModal();
   const { pathname } = location;
   const sidebar = useRef<any>(null);
   const [windowWidth, setWindowWidth] = useState(window.innerWidth);
+
+  const rawTenant = tenantId || (pathname.split('/')[1] || '');
+  const cleanSlug = rawTenant.replace(/^tenant=/, '').replace(/^tenant-/, '').toLowerCase().trim();
+  const cleanPrefix = cleanSlug && !['auth', 'dev', 'assets', 'api'].includes(cleanSlug) ? `/${cleanSlug}` : '';
+
+  const getTenantPath = (path?: string) => {
+    if (!path || typeof path !== 'string') return '';
+    if (!cleanPrefix) return path;
+    if (path === '/') return cleanPrefix;
+    const cleanSub = path.startsWith('/') ? path : `/${path}`;
+    return `${cleanPrefix}${cleanSub}`;
+  };
+
+
+
 
   // Master tracking ID to determine which global branch header is clicked open
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
@@ -301,18 +333,44 @@ const Sidebar = ({ sidebarOpen, setSidebarOpen }: SidebarProps) => {
 
       <aside ref={sidebar} className={`fixed left-0 top-0 z-99999 flex h-screen flex-col bg-white duration-300 ease-in-out dark:bg-boxdark shadow-2xl ${isMobile ? 'block' : 'min-[751px]:sticky min-[751px]:top-0'} ${sidebarOpen ? 'w-72.5 translate-x-0 border-r border-stroke dark:border-strokedark visible' : 'w-0 -translate-x-full min-[751px]:w-18 min-[751px]:translate-x-0 min-[751px]:border-r min-[751px]:border-stroke min-[751px]:dark:border-strokedark max-[750px]:invisible'}`} >
 
-        <div className={`flex items-center gap-2 py-6 border-b border-stroke dark:border-strokedark min-h-[76px] duration-300 ${sidebarOpen ? 'px-6' : 'px-0 min-[751px]:px-2 justify-center'}`} >
-          <NavLink className="flex items-center gap-2 w-full" to="/">
-            {(sidebarOpen || isMobile) ? (
-              <p className="text-xl font-bold text-primary dark:text-white truncate block w-full text-left tracking-tight">
-                Softhub-PK ERP
-                <br />
-                Software
-              </p>
-            ) : (
-              <p className="text-xl font-bold text-primary dark:text-blue-400 text-center w-full min-[751px]:block hidden">S</p>
-            )}
-          </NavLink>
+        <div className={`flex items-center justify-between gap-2 py-6 border-b border-stroke dark:border-strokedark min-h-[76px] duration-300 ${sidebarOpen ? 'px-6' : 'px-0 min-[751px]:px-2 justify-center'}`} >
+          {(sidebarOpen || isMobile) ? (
+            <div className="flex items-center justify-between w-full">
+              <NavLink className="flex items-center gap-1" to="/">
+                <img src={IconDark} alt="NHT Icon" className="hidden dark:block h-8 w-auto object-contain shrink-0" />
+                <img src={IconLight} alt="NHT Icon" className="block dark:hidden h-8 w-auto object-contain shrink-0" />
+                <p className="text-primary dark:text-white truncate block text-left tracking-tight leading-tight margin-right-4">
+                  <span className="text-lg font-extrabold text-blue-600">NOOR </span>
+                  <span className="text-lg font-extrabold text-black dark:text-gray-300">HORIZON</span>
+                  <br />
+                  <span className="text-sm text-blue-600 font-bold">TECHNOLOGIES</span> <br></br>
+                  <span className="text-xs text-blue-600 font-bold">ERP</span>
+                </p>
+              </NavLink>
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setSidebarOpen(false);
+                }}
+                className="p-2 hover:bg-gray-50 dark:hover:bg-meta-4/50 rounded-full text-gray-800 dark:text-gray-100 transition-colors"
+                title="Close Sidebar"
+              >
+                <AiOutlineArrowLeft size={20} className="stroke-current stroke-[40px]" />
+              </button>
+            </div>
+          ) : (
+            <div
+              className="w-full flex justify-center cursor-pointer"
+              onClick={(e) => {
+                e.stopPropagation();
+                setSidebarOpen(true);
+              }}
+              title="Open Sidebar"
+            >
+              <img src={IconDark} alt="NAM Icon" className="hidden dark:block h-7 w-auto object-contain mx-auto" />
+              <img src={IconLight} alt="NAM Icon" className="block dark:hidden h-7 w-auto object-contain mx-auto" />
+            </div>
+          )}
         </div>
 
         <div className="no-scrollbar flex flex-col overflow-y-auto overflow-x-hidden flex-1">
@@ -331,7 +389,9 @@ const Sidebar = ({ sidebarOpen, setSidebarOpen }: SidebarProps) => {
                     openMenuId={openMenuId}
                     setOpenMenuId={setOpenMenuId}
                     menuUniqueKey={`root-${index}`}
+                    getTenantPath={getTenantPath}
                   />
+
                 ))
               }
               <li className={`group relative flex items-center rounded-sm py-2.5 font-medium text-textColor duration-300 ease-in-out hover:bg-meta-2 dark:hover:bg-meta-4 dark:text-white cursor-pointer mt-4 border-t border-stroke pt-4 ${sidebarOpen ? 'justify-start px-4' : 'justify-center mx-auto w-10 h-10 px-0'}`} onClick={() => logout()} title={!sidebarOpen ? 'LogOut' : undefined} >

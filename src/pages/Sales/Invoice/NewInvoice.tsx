@@ -59,6 +59,9 @@ const NewInvoice = () => {
   }, []);
   const getFormInitialValues = () => {
     if (editData) {
+      const parsedItems = Array.isArray(editData.items)
+        ? editData.items
+        : JSON.parse(editData.items || '[]');
       return {
         customerName: editData.customer_name || editData.customerName || '',
         saleDate: editData.sale_date || new Date().toISOString().split('T')[0],
@@ -72,7 +75,11 @@ const NewInvoice = () => {
         selectedBankTitle: editData.selected_bank || '',
         cashAmountPaid: Number(editData.cash_amount_paid || editData.bank_amount || 0),
         dcNo: editData.dc_no || '',
-        items: Array.isArray(editData.items) ? editData.items : JSON.parse(editData.items || '[]')
+        items: parsedItems.map((it: any) => ({
+          ...it,
+          discountPer: Number(it.discountPer ?? it.discount_per ?? 0),
+          discountAmt: Number(it.discountAmt ?? it.discount_amt ?? it.discount ?? 0)
+        }))
       };
     }
     return {
@@ -80,7 +87,7 @@ const NewInvoice = () => {
       dispatchWarehouse: '', fbrScenario: 'Goods at Standard Rate to Registered Buyers', salesman: '',
       transportType: 'No Transport (Handover)', transportCharges: 0, settlementMode: 'Cash',
       selectedBankTitle: '', cashAmountPaid: 0, dcNo: '',
-      items: [{ itemName: '', qty: 1, rp: 0, gstRate: 18, fTaxPer: 0, amount: 0, availableQty: 0 }]
+      items: [{ itemName: '', qty: 1, rp: 0, discountPer: 0, discountAmt: 0, gstRate: 18, fTaxPer: 0, amount: 0, availableQty: 0 }]
     };
   };
 
@@ -105,22 +112,31 @@ const NewInvoice = () => {
         itemName: Yup.string().required('Required Field'),
         qty: Yup.number().min(1, 'Min Qty 1').required('Required Field'),
         rp: Yup.number().min(0, 'Min Price 0').required('Required Field'),
+        discountPer: Yup.number().min(0).nullable(),
+        discountAmt: Yup.number().min(0).nullable(),
         gstRate: Yup.number().min(0).required('Required Field'),
         fTaxPer: Yup.number().min(0).required('Required Field')
       })
     ).min(1)
   });
 
-  const handleProductSelectionWithWH = async (selectedName: string, index: number, chosenWarehouse: string, setFieldValue: any) => {
+  const handleProductSelectionWithWH = async (selectedName: string, index: number, chosenWarehouse: string, setFieldValue: any, currentItem?: any) => {
     const matchingProduct = productsList.find(p => p.product_name === selectedName);
     if (!matchingProduct) {
       setFieldValue(`items.${index}.itemName`, '');
       setFieldValue(`items.${index}.availableQty`, 0);
       return;
     }
+    const newRp = Number(matchingProduct.retail_price) || 0;
     setFieldValue(`items.${index}.itemName`, matchingProduct.product_name);
-    setFieldValue(`items.${index}.rp`, Number(matchingProduct.retail_price) || 0);
+    setFieldValue(`items.${index}.rp`, newRp);
     setFieldValue(`items.${index}.hsCode`, matchingProduct.hs_code || matchingProduct.hscode || matchingProduct.hsCodeNo || matchingProduct.hs_Code || '');
+
+    if (currentItem && currentItem.discountPer) {
+      const gross = newRp * (Number(currentItem.qty) || 1);
+      const calculatedAmt = (gross * Number(currentItem.discountPer)) / 100;
+      setFieldValue(`items.${index}.discountAmt`, Number(calculatedAmt.toFixed(2)));
+    }
 
     if (!chosenWarehouse) {
       setFieldValue(`items.${index}.availableQty`, 0);
@@ -140,45 +156,68 @@ const NewInvoice = () => {
       setFieldValue(`items.${index}.availableQty`, 0);
     }
   };
+
+  const blockInvalidChar = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (['-', 'e', 'E', '+'].includes(e.key)) {
+      e.preventDefault();
+    }
+  };
+
   const calculateFbrLineTotals = (item: any, scenario: string) => {
-    const qty = Number(item.qty) || 0;
-    const rp = Number(item.rp) || 0;
+    const qty = Math.max(0, Number(item.qty) || 0);
+    const rp = Math.max(0, Number(item.rp) || 0);
     const grossBase = rp * qty;
+    const discountAmt = Math.max(0, Number(item.discountAmt) || 0);
 
     let activeGstRate = Number(item.gstRate || 18);
     let activeFTaxPer = Number(item.fTaxPer || 0);
 
-    switch (scenario) {
-      case 'Goods at Standard Rate to Unregistered Buyers':
-        activeGstRate = 18;
-        activeFTaxPer = 4;
-        break;
-      case 'Reduced Rate Sale':
-        activeGstRate = 12;
-        activeFTaxPer = 0;
-        break;
-      case 'Exempt Goods Sale':
-      case 'Zero Rated Sale':
-        activeGstRate = 0;
-        activeFTaxPer = 0;
-        break;
-      case 'Goods Sold that are Listed in SRO 297(1)/2023':
-        activeGstRate = 25;
-        activeFTaxPer = 0;
-        break;
-      default:
-        break;
+    if (scenario === 'Reduced Rate Sale') {
+      activeGstRate = item.gstRate !== undefined && item.gstRate !== null && item.gstRate !== '' ? Number(item.gstRate) : 0;
+      activeFTaxPer = item.fTaxPer !== undefined && item.fTaxPer !== null && item.fTaxPer !== '' ? Number(item.fTaxPer) : 0;
+    } else {
+      switch (scenario) {
+        case 'Goods at Standard Rate to Unregistered Buyers':
+          activeGstRate = 18;
+          activeFTaxPer = 4;
+          break;
+        case 'Exempt Goods Sale':
+        case 'Zero Rated Sale':
+          activeGstRate = 0;
+          activeFTaxPer = 0;
+          break;
+        case 'Goods Sold that are Listed in SRO 297(1)/2023':
+          activeGstRate = 25;
+          activeFTaxPer = 0;
+          break;
+        case 'Sale of 3rd Schedule Goods':
+          activeGstRate = 18;
+          activeFTaxPer = 0;
+          break;
+        case 'Goods at Standard Rate to Registered Buyers':
+        default:
+          activeGstRate = 18;
+          activeFTaxPer = 0;
+          break;
+      }
     }
 
-    const gstAmt = (grossBase / 100) * activeGstRate;
-    const fTaxAmt = (grossBase / 100) * activeFTaxPer;
-    const netTotal = grossBase + gstAmt + fTaxAmt;
+    const isRetailBasedTax =
+      scenario === 'Sale of 3rd Schedule Goods' ||
+      scenario === 'Goods Sold that are Listed in SRO 297(1)/2023';
 
-    return { grossBase, activeGstRate, activeFTaxPer, gstAmt, fTaxAmt, netTotal };
+    // 3rd Schedule Goods & SRO 297(1)/2023: GST is calculated on full printed retail price (grossBase).
+    // All other scenarios: GST is calculated on retail price after deducting discount (grossBase - discountAmt).
+    const gstTaxBase = isRetailBasedTax ? grossBase : Math.max(0, grossBase - discountAmt);
+
+    const gstAmt = (gstTaxBase / 100) * activeGstRate;
+    const fTaxAmt = (gstTaxBase / 100) * activeFTaxPer;
+
+    const remainingRetail = grossBase - discountAmt;
+    const netTotal = remainingRetail + gstAmt + fTaxAmt;
+
+    return { grossBase, activeGstRate, activeFTaxPer, gstAmt, fTaxAmt, discountAmt, remainingRetail, netTotal };
   };
-
-  const blockInvalidChar = (e: React.KeyboardEvent<HTMLInputElement>) =>
-    ['-', 'e', 'E', '+'].includes(e.key) && e.preventDefault();
 
   if (initialLoading) return <div className="flex h-48 items-center justify-center"><Spinner /></div>;
 
@@ -297,10 +336,19 @@ const NewInvoice = () => {
 
                   <div className="md:col-span-2">
                     <label className="block font-bold text-primary mb-1">Taxation & Sales Tax Statutory Transaction Scenario: *</label>
-                    <select name="fbrScenario" value={values.fbrScenario} onChange={handleChange} className="w-full rounded border border-primary p-2 text-sm bg-white dark:bg-boxdark font-black text-primary outline-none">
+                    <select name="fbrScenario" value={values.fbrScenario} onChange={(e) => {
+                      const newScen = e.target.value;
+                      handleChange(e);
+                      if (newScen === 'Reduced Rate Sale') {
+                        values.items.forEach((_: any, idx: number) => {
+                          setFieldValue(`items.${idx}.gstRate`, 0);
+                          setFieldValue(`items.${idx}.fTaxPer`, 0);
+                        });
+                      }
+                    }} className="w-full rounded border border-primary p-2 text-sm bg-white dark:bg-boxdark font-black text-primary outline-none">
                       <option value="Goods at Standard Rate to Registered Buyers">Goods at Standard Rate to Registered Buyers</option>
                       <option value="Goods at Standard Rate to Unregistered Buyers">Goods at Standard Rate to Unregistered Buyers (+4% Further Tax)</option>
-                      <option value="Reduced Rate Sale">Reduced Rate Sale (12% Concession slab)</option>
+                      <option value="Reduced Rate Sale">Reduced Rate Sale (Concession slab)</option>
                       <option value="Exempt Goods Sale">Exempt Goods Sale (0% Tax)</option>
                       <option value="Zero Rated Sale">Zero Rated Sale (0% Tax)</option>
                       <option value="Sale of 3rd Schedule Goods">Sale of 3rd Schedule Goods</option>
@@ -332,52 +380,186 @@ const NewInvoice = () => {
                 </div>
                 <div className="border border-stroke dark:border-strokedark rounded-sm overflow-hidden mt-6">
                   <FieldArray name="items">
-                    {({ push, remove }) => (
-                      <div className="w-full overflow-x-auto">
-                        <table className="w-full table-auto border-collapse text-left whitespace-nowrap min-w-[1250px]">
-                          <thead className="bg-gray-100 dark:bg-meta-4 text-[10px] font-black uppercase text-black dark:text-white border-b">
-                            <tr>
-                              <th className="p-2 w-12 text-center">S#</th>
-                              <th className="p-2">Item Product Description</th>
-                              <th className="p-2 w-44 text-center bg-blue-50/50 dark:bg-meta-4/20 text-primary font-bold">{values.dispatchWarehouse ? `Stock in ${values.dispatchWarehouse}` : 'Stock in'}</th>
-                              <th className="p-2 w-24 text-center">Qty</th>
-                              <th className="p-2 w-32 text-right">Unit Retail Price</th>
-                              <th className="p-2 w-16 text-center">GST %</th>
-                              <th className="p-2 w-16 text-center">F.Tax %</th>
-                              <th className="p-2 w-24 text-right">GST Amt</th>
-                              <th className="p-2 w-24 text-right">F.Tax Amt</th>
-                              <th className="p-2 w-36 text-right pr-4">Net Total Line</th>
-                              <th className="p-2 w-12 text-center">Action</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {values.items.map((item: any, idx: number) => {
-                              const fbr = calculateFbrLineTotals(item, values.fbrScenario);
-                              const hasItemError = hasAttempted && errors.items && (errors.items as any)[idx]?.itemName;
-                              return (
-                                <tr key={idx} className={`border-b border-stroke dark:border-strokedark font-mono font-semibold text-black dark:text-white ${hasItemError ? 'bg-red-50/5' : ''}`}>
-                                  <td className="p-2 text-center font-sans text-gray-400">{idx + 1}</td>
-                                  <td className="p-2">
-                                    <select name={`items.${idx}.itemName`} value={item.itemName} onChange={(e) => handleProductSelectionWithWH(e.target.value, idx, values.dispatchWarehouse, setFieldValue)} className={`w-full bg-transparent font-sans font-bold border rounded p-1 outline-none text-xs text-black dark:text-white ${hasItemError ? 'border-red-500 bg-red-50/10' : 'border-transparent'}`}><option value="">-- Choose Product Stock Asset --</option>{productsList.map((p, i) => <option key={i} value={p.product_name}>{p.product_name}</option>)}</select>
-                                    {hasItemError && <p className="text-red-500 text-[9px] font-bold mt-0.5">Required Field</p>}
-                                  </td>
-                                  <td className="p-2 text-center font-mono font-black text-success bg-success/5 text-xs w-[130px]">{Number(item.availableQty || 0).toLocaleString()}</td>
-                                  <td className="p-2"><input type="number" onKeyDown={blockInvalidChar} name={`items.${idx}.qty`} value={item.qty} onChange={handleChange} className={`w-full bg-transparent text-center font-bold text-primary outline-none border rounded p-1 ${hasAttempted && (errors.items as any)?.[idx] && (!item.qty || item.qty < 1) ? 'border-red-500 bg-red-50/10' : 'border-transparent'}`} /></td>
-                                  <td className="p-2"><input type="number" onKeyDown={blockInvalidChar} name={`items.${idx}.rp`} value={item.rp} onChange={handleChange} className={`w-full bg-transparent text-right font-bold outline-none border rounded p-1 ${hasAttempted && (errors.items as any)?.[idx] && (!item.rp || item.rp < 0) ? 'border-red-500 bg-red-50/10' : 'border-transparent'}`} /></td>
-                                  <td className="p-2 text-center text-gray-400 font-sans">{fbr.activeGstRate}%</td>
-                                  <td className="p-2 text-center text-gray-400 font-sans">{fbr.activeFTaxPer}%</td>
-                                  <td className="p-2 text-right pr-2 text-gray-400">Rs. {fbr.gstAmt.toFixed(2)}</td>
-                                  <td className="p-2 text-right pr-2 text-gray-400">Rs. {fbr.fTaxAmt.toFixed(2)}</td>
-                                  <td className="p-2 text-right pr-4 text-success font-black">Rs. {fbr.netTotal.toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
-                                  <td className="p-2 text-center">{values.items.length > 1 && <button type="button" onClick={() => remove(idx)} className="text-gray-400 hover:text-danger cursor-pointer"><FiTrash2 size={14} /></button>}</td>
-                                </tr>
-                              );
-                            })}
-                          </tbody>
-                        </table>
-                        <div className="p-2 bg-gray-50/50 dark:bg-meta-4/10 border-t"><button type="button" onClick={() => push({ itemName: '', qty: 1, rp: 0, gstRate: 18, fTaxPer: 0, amount: 0, availableQty: 0 })} className="inline-flex items-center gap-1 bg-primary text-white font-bold py-1 px-3 rounded text-[10px] cursor-pointer">+ Add Row Line</button></div>
-                      </div>
-                    )}
+                    {({ push, remove }) => {
+                      const showDiscount = true;
+                      return (
+                        <div className="w-full overflow-x-auto">
+                          <table className={`w-full table-auto border-collapse text-left whitespace-nowrap ${showDiscount ? 'min-w-[1450px]' : 'min-w-[1250px]'}`}>
+                            <thead className="bg-gray-100 dark:bg-meta-4 text-[10px] font-black uppercase text-black dark:text-white border-b">
+                              <tr>
+                                <th className="p-2 w-12 text-center">S#</th>
+                                <th className="p-2">Item Product Description</th>
+                                <th className="p-2 w-44 text-center bg-blue-50/50 dark:bg-meta-4/20 text-primary font-bold">{values.dispatchWarehouse ? `Stock in ${values.dispatchWarehouse}` : 'Stock in'}</th>
+                                <th className="p-2 w-24 text-center">Qty</th>
+                                <th className="p-2 w-32 text-right">Unit Retail Price</th>
+                                {showDiscount && (
+                                  <>
+                                    <th className="p-2 w-24 text-center bg-amber-50/80 dark:bg-amber-900/20 text-amber-700 dark:text-amber-400">Discount %</th>
+                                    <th className="p-2 w-32 text-right bg-amber-50/80 dark:bg-amber-900/20 text-amber-700 dark:text-amber-400">Discount Amt</th>
+                                  </>
+                                )}
+                                <th className="p-2 w-16 text-center">GST %</th>
+                                <th className="p-2 w-16 text-center">F.Tax %</th>
+                                <th className="p-2 w-24 text-right">GST Amt</th>
+                                <th className="p-2 w-24 text-right">F.Tax Amt</th>
+                                <th className="p-2 w-36 text-right pr-4">Net Total Line</th>
+                                <th className="p-2 w-12 text-center">Action</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {values.items.map((item: any, idx: number) => {
+                                const fbr = calculateFbrLineTotals(item, values.fbrScenario);
+                                const hasItemError = hasAttempted && errors.items && (errors.items as any)[idx]?.itemName;
+                                return (
+                                  <tr key={idx} className={`border-b border-stroke dark:border-strokedark font-mono font-semibold text-black dark:text-white ${hasItemError ? 'bg-red-50/5' : ''}`}>
+                                    <td className="p-2 text-center font-sans text-gray-400">{idx + 1}</td>
+                                    <td className="p-2">
+                                      <select
+                                        name={`items.${idx}.itemName`}
+                                        value={item.itemName}
+                                        onChange={(e) => handleProductSelectionWithWH(e.target.value, idx, values.dispatchWarehouse, setFieldValue, item)}
+                                        className={`w-full bg-transparent font-sans font-bold border rounded p-1 outline-none text-xs text-black dark:text-white ${hasItemError ? 'border-red-500 bg-red-50/10' : 'border-transparent'}`}
+                                      >
+                                        <option value="">-- Choose Product Stock Asset --</option>
+                                        {productsList.map((p, i) => <option key={i} value={p.product_name}>{p.product_name}</option>)}
+                                      </select>
+                                      {hasItemError && <p className="text-red-500 text-[9px] font-bold mt-0.5">Required Field</p>}
+                                    </td>
+                                    <td className="p-2 text-center font-mono font-black text-success bg-success/5 text-xs w-[130px]">{Number(item.availableQty || 0).toLocaleString()}</td>
+                                    <td className="p-2">
+                                       <input
+                                         type="number"
+                                         min="1"
+                                         onKeyDown={blockInvalidChar}
+                                         onInput={(e: any) => { if (Number(e.target.value) < 1 && e.target.value !== '') e.target.value = 1; }}
+                                         name={`items.${idx}.qty`}
+                                         value={item.qty}
+                                         onChange={(e) => {
+                                           const newQty = Math.max(0, Number(e.target.value) || 0);
+                                           setFieldValue(`items.${idx}.qty`, newQty);
+                                           const currentRp = Math.max(0, Number(item.rp) || 0);
+                                           const gross = newQty * currentRp;
+                                           const disPer = Math.max(0, Number(item.discountPer) || 0);
+                                           if (disPer > 0) {
+                                             setFieldValue(`items.${idx}.discountAmt`, Number(((gross * disPer) / 100).toFixed(2)));
+                                           }
+                                         }}
+                                         className={`w-full bg-transparent text-center font-bold text-primary outline-none border rounded p-1 ${hasAttempted && (errors.items as any)?.[idx] && (!item.qty || item.qty < 1) ? 'border-red-500 bg-red-50/10' : 'border-transparent'}`}
+                                       />
+                                     </td>
+                                     <td className="p-2">
+                                       <input
+                                         type="number"
+                                         min="0"
+                                         onKeyDown={blockInvalidChar}
+                                         onInput={(e: any) => { if (Number(e.target.value) < 0) e.target.value = 0; }}
+                                         name={`items.${idx}.rp`}
+                                         value={item.rp}
+                                         onChange={(e) => {
+                                           const newRp = Math.max(0, Number(e.target.value) || 0);
+                                           setFieldValue(`items.${idx}.rp`, newRp);
+                                           const currentQty = Math.max(0, Number(item.qty) || 0);
+                                           const gross = newRp * currentQty;
+                                           const disPer = Math.max(0, Number(item.discountPer) || 0);
+                                           if (disPer > 0) {
+                                             setFieldValue(`items.${idx}.discountAmt`, Number(((gross * disPer) / 100).toFixed(2)));
+                                           }
+                                         }}
+                                         className={`w-full bg-transparent text-right font-bold outline-none border rounded p-1 ${hasAttempted && (errors.items as any)?.[idx] && (!item.rp || item.rp < 0) ? 'border-red-500 bg-red-50/10' : 'border-transparent'}`}
+                                       />
+                                     </td>
+
+                                     {showDiscount && (
+                                       <>
+                                         <td className="p-2">
+                                           <input
+                                             type="number"
+                                             min="0"
+                                             onKeyDown={blockInvalidChar}
+                                             onInput={(e: any) => { if (Number(e.target.value) < 0) e.target.value = 0; }}
+                                             name={`items.${idx}.discountPer`}
+                                             value={item.discountPer ?? 0}
+                                             onChange={(e) => {
+                                               const val = Math.max(0, Number(e.target.value) || 0);
+                                               setFieldValue(`items.${idx}.discountPer`, val);
+                                               const gross = Math.max(0, Number(item.qty) || 0) * Math.max(0, Number(item.rp) || 0);
+                                               const amt = (gross * val) / 100;
+                                               setFieldValue(`items.${idx}.discountAmt`, Number(amt.toFixed(2)));
+                                             }}
+                                             placeholder="0"
+                                             className="w-full bg-amber-50/40 dark:bg-amber-900/10 text-amber-700 dark:text-amber-400 text-center font-black outline-none border border-amber-300 dark:border-amber-700 rounded p-1 text-xs focus:border-amber-500"
+                                           />
+                                         </td>
+                                         <td className="p-2">
+                                           <input
+                                             type="number"
+                                             min="0"
+                                             onKeyDown={blockInvalidChar}
+                                             onInput={(e: any) => { if (Number(e.target.value) < 0) e.target.value = 0; }}
+                                             name={`items.${idx}.discountAmt`}
+                                             value={item.discountAmt ?? 0}
+                                             onChange={(e) => {
+                                               const val = Math.max(0, Number(e.target.value) || 0);
+                                               setFieldValue(`items.${idx}.discountAmt`, val);
+                                               const gross = Math.max(0, Number(item.qty) || 0) * Math.max(0, Number(item.rp) || 0);
+                                               const per = gross > 0 ? (val / gross) * 100 : 0;
+                                               setFieldValue(`items.${idx}.discountPer`, Number(per.toFixed(2)));
+                                             }}
+                                             placeholder="0"
+                                             className="w-full bg-amber-50/40 dark:bg-amber-900/10 text-amber-700 dark:text-amber-400 text-right font-black outline-none border border-amber-300 dark:border-amber-700 rounded p-1 text-xs focus:border-amber-500"
+                                           />
+                                         </td>
+                                       </>
+                                     )}
+
+                                      {values.fbrScenario === 'Reduced Rate Sale' ? (
+                                        <>
+                                          <td className="p-2 w-20">
+                                            <input
+                                              type="number"
+                                              min="0"
+                                              onKeyDown={blockInvalidChar}
+                                              onInput={(e: any) => { if (Number(e.target.value) < 0) e.target.value = 0; }}
+                                              name={`items.${idx}.gstRate`}
+                                              value={item.gstRate ?? 0}
+                                              onChange={(e) => setFieldValue(`items.${idx}.gstRate`, Math.max(0, Number(e.target.value) || 0))}
+                                              placeholder="0"
+                                              className="w-full bg-blue-50/40 dark:bg-blue-900/10 text-blue-700 dark:text-blue-400 text-center font-black outline-none border border-blue-300 dark:border-blue-700 rounded p-1 text-xs focus:border-blue-500"
+                                            />
+                                          </td>
+                                          <td className="p-2 w-20">
+                                            <input
+                                              type="number"
+                                              min="0"
+                                              onKeyDown={blockInvalidChar}
+                                              onInput={(e: any) => { if (Number(e.target.value) < 0) e.target.value = 0; }}
+                                              name={`items.${idx}.fTaxPer`}
+                                              value={item.fTaxPer ?? 0}
+                                              onChange={(e) => setFieldValue(`items.${idx}.fTaxPer`, Math.max(0, Number(e.target.value) || 0))}
+                                              placeholder="0"
+                                              className="w-full bg-blue-50/40 dark:bg-blue-900/10 text-blue-700 dark:text-blue-400 text-center font-black outline-none border border-blue-300 dark:border-blue-700 rounded p-1 text-xs focus:border-blue-500"
+                                            />
+                                          </td>
+                                        </>
+                                      ) : (
+                                        <>
+                                          <td className="p-2 text-center text-gray-400 font-sans">{fbr.activeGstRate}%</td>
+                                          <td className="p-2 text-center text-gray-400 font-sans">{fbr.activeFTaxPer}%</td>
+                                        </>
+                                      )}
+                                    <td className="p-2 text-right pr-2 text-gray-400">Rs. {fbr.gstAmt.toFixed(2)}</td>
+                                    <td className="p-2 text-right pr-2 text-gray-400">Rs. {fbr.fTaxAmt.toFixed(2)}</td>
+                                    <td className="p-2 text-right pr-4 text-success font-black">Rs. {fbr.netTotal.toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
+                                    <td className="p-2 text-center">{values.items.length > 1 && <button type="button" onClick={() => remove(idx)} className="text-gray-400 hover:text-danger cursor-pointer"><FiTrash2 size={14} /></button>}</td>
+                                  </tr>
+                                );
+                              })}
+                            </tbody>
+                          </table>
+                          <div className="p-2 bg-gray-50/50 dark:bg-meta-4/10 border-t"><button type="button" onClick={() => push({ itemName: '', qty: 1, rp: 0, discountPer: 0, discountAmt: 0, gstRate: 18, fTaxPer: 0, amount: 0, availableQty: 0 })} className="inline-flex items-center gap-1 bg-primary text-white font-bold py-1 px-3 rounded text-[10px] cursor-pointer">+ Add Row Line</button></div>
+                        </div>
+                      );
+                    }}
                   </FieldArray>
                 </div>
                 <div className="flex flex-col md:flex-row justify-between items-start gap-6 border border-stroke p-4 rounded-sm bg-slate-50/10 mt-6">

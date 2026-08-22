@@ -3,6 +3,8 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { supabase } from '../../../Context/supabaseClient';
 import { toast } from 'react-hot-toast';
 import Spinner from '../../../ui/Spinner';
+import { useAuth } from '../../../Context/Auth';
+
 
 interface ReturnItem {
   itemName?: string;
@@ -45,7 +47,9 @@ interface ReturnData {
 const PrintSalesReturn = () => {
   const { id } = useParams();
   const navigate = useNavigate();
+  const { businessName, tenantId } = useAuth();
   const [returnRecord, setReturnRecord] = useState<ReturnData | null>(null);
+
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -181,7 +185,7 @@ const PrintSalesReturn = () => {
       `}</style>
       <div className="no-print flex justify-between items-center mb-6 bg-slate-50 p-4 rounded border border-stroke">
         <button
-          onClick={() => navigate('/Sales-Return/Debit-Notes/List')}
+          onClick={() => navigate(`${tenantId ? `/${tenantId}` : ''}/Sales-Return/Debit-Notes/List`)}
           className="flex items-center gap-2 text-sm font-medium text-gray-600 hover:text-black transition"
         >
           ← Back to List
@@ -197,10 +201,11 @@ const PrintSalesReturn = () => {
       <div className="print-voucher bg-white">
         <div>
           <div className="text-center border-b border-gray-300 pb-4 mb-6">
-            <h2 className="text-xl font-extrabold tracking-wide uppercase text-primary">Softhub-Pk ERP Distribution</h2>
-            <p className="text-xs text-gray-500 font-medium">Plot 12, Industrial Area Phase II, Hyderabad, Sindh, Pakistan</p>
+            <h2 className="text-xl font-extrabold tracking-wide uppercase text-primary">{businessName ? businessName.toUpperCase() : 'NOOR HORIZON TECHNOLOGIES ERP'}</h2>
+            <p className="text-xs text-gray-500 font-medium">Enterprise Sales Return Ledger & FBR Fiscal Record</p>
             <h3 className="text-md font-bold mt-3 border border-black inline-block px-4 py-1 uppercase bg-gray-50">Sales Return / Credit Note</h3>
           </div>
+
 
           <div className="grid grid-cols-2 gap-4 border-b border-gray-300 pb-4 mb-6 text-xs font-semibold">
             <div className="space-y-1">

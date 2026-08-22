@@ -2,6 +2,7 @@ import { MdDashboard, MdReceipt, MdPeople, MdAdminPanelSettings, MdEmojiTranspor
 import Dashboard from '../pages/Dashboard/Dashboard';
 import NewInvoice from '../pages/Sales/Invoice/NewInvoice';
 import SalesHistory from '../pages/Sales/Invoice/SalesHistory';
+import PrintInvoice from '../pages/Sales/Invoice/PrintInvoice';
 import AddCustomer from '../pages/Sales/Customers/AddCustomer';
 import CustomerHistory from '../pages/Sales/Customers/CustomerHistory';
 import AddSalesman from '../pages/Sales/Salesman/AddSalesman';
@@ -343,6 +344,12 @@ export const adminRoutes = [
     path: '/Sales-Return/Debit-Notes/Print/:id',
     component: <PrintSalesReturn />,
     label: 'Print Voucher',
+    hideFromSidebar: true
+  },
+  {
+    path: '/sales/invoice/print/:id',
+    component: <PrintInvoice />,
+    label: 'Print Invoice',
     hideFromSidebar: true
   },
   {

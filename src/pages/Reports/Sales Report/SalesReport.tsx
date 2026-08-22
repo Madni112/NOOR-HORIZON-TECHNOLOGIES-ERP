@@ -3,10 +3,13 @@ import { useNavigate } from 'react-router-dom';
 import { supabase } from '../../../Context/supabaseClient';
 import { toast } from 'react-hot-toast';
 import Spinner from '../../../ui/Spinner';
+import { useAuth } from '../../../Context/Auth';
 
 const SalesReport = () => {
     const navigate = useNavigate();
+    const { tenantId } = useAuth();
     const [loading, setLoading] = useState(true);
+
     const [reportType, setReportType] = useState<'sale' | 'return' | 'invoice'>('sale');
 
     const [customers, setCustomers] = useState<any[]>([]);
@@ -45,7 +48,9 @@ const SalesReport = () => {
                 const { data: uomData } = await supabase
                     .from('inventory_uom')
                     .select('id, short_code, full_name')
+                    .eq('tenant_id', tenantId || 'bashir')
                     .eq('is_active', true);
+
 
                 if (cust) setCustomers(cust);
                 if (sm) setSalesmen(sm);
@@ -197,7 +202,7 @@ const SalesReport = () => {
                 <div className="mt-8 pt-4 border-t border-stroke dark:border-strokedark flex justify-end">
                     <button
                         type="button"
-                        onClick={() => navigate('/Reports/Sales-Report/Print', { state: { type: reportType, filters: criteria } })}
+                        onClick={() => navigate(`${tenantId ? `/${tenantId}` : ''}/Reports/Sales-Report/Print`, { state: { type: reportType, filters: criteria } })}
                         className="rounded bg-primary py-2.5 px-12 font-bold text-white hover:bg-opacity-90 transition text-xs shadow-sm h-9 cursor-pointer"
                     >
                         Show Report

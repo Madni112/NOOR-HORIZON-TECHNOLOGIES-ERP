@@ -16,6 +16,8 @@ import {
   MdArrowDownward,
   MdReceiptLong
 } from 'react-icons/md';
+import StatCard from '../../ui/StatCard';
+import ActionCard from '../../ui/ActionCard';
 
 const Dashboard: React.FC = () => {
   const navigate = useNavigate();
@@ -41,6 +43,11 @@ const Dashboard: React.FC = () => {
   }
 
   // --- ApexCharts Configurations ---
+  const hasMonthlyTrend = Boolean(metrics.monthlySalesTrend && metrics.monthlySalesTrend.length > 0);
+  const monthlyCategories = hasMonthlyTrend ? metrics.monthlySalesTrend.map((m) => m.month) : ['Jan', 'Feb', 'Mar'];
+  const grossSalesData = hasMonthlyTrend ? metrics.monthlySalesTrend.map((m) => m.sales) : [0, 0, 0];
+  const procurementData = hasMonthlyTrend ? metrics.monthlySalesTrend.map((m) => m.purchases) : [0, 0, 0];
+
   // 1. Sales vs Purchases Trend Chart
   const salesVsPurchasesOptions: any = {
     chart: {
@@ -53,7 +60,7 @@ const Dashboard: React.FC = () => {
     dataLabels: { enabled: false },
     stroke: { curve: 'smooth', width: 2 },
     xaxis: {
-      categories: metrics.monthlySalesTrend.map((m) => m.month),
+      categories: monthlyCategories,
       labels: { style: { colors: '#64748B', fontSize: '11px' } }
     },
     yaxis: {
@@ -69,18 +76,23 @@ const Dashboard: React.FC = () => {
   };
 
   const salesVsPurchasesSeries = [
-    { name: 'Gross Sales', data: metrics.monthlySalesTrend.map((m) => m.sales) },
-    { name: 'Procurement Purchases', data: metrics.monthlySalesTrend.map((m) => m.purchases) }
+    { name: 'Gross Sales', data: grossSalesData },
+    { name: 'Procurement Purchases', data: procurementData }
   ];
 
   // 2. Cash Flow Chart (Inflow vs Outflow)
+  const hasCashFlow = Boolean(metrics.cashFlowTrend && metrics.cashFlowTrend.length > 0);
+  const cashCategories = hasCashFlow ? metrics.cashFlowTrend.map((m) => m.month) : ['Jan', 'Feb', 'Mar'];
+  const cashInflowData = hasCashFlow ? metrics.cashFlowTrend.map((m) => m.inflow) : [0, 0, 0];
+  const cashOutflowData = hasCashFlow ? metrics.cashFlowTrend.map((m) => m.outflow) : [0, 0, 0];
+
   const cashFlowOptions: any = {
     chart: { type: 'bar', height: 310, toolbar: { show: false } },
     colors: ['#10B981', '#FF5733'],
     plotOptions: { bar: { columnWidth: '40%', borderRadius: 4 } },
     dataLabels: { enabled: false },
     xaxis: {
-      categories: metrics.cashFlowTrend.map((m) => m.month),
+      categories: cashCategories,
       labels: { style: { colors: '#64748B', fontSize: '11px' } }
     },
     yaxis: {
@@ -93,187 +105,75 @@ const Dashboard: React.FC = () => {
   };
 
   const cashFlowSeries = [
-    { name: 'Cash Received (Inflow)', data: metrics.cashFlowTrend.map((m) => m.inflow) },
-    { name: 'Cash Paid (Outflow)', data: metrics.cashFlowTrend.map((m) => m.outflow) }
+    { name: 'Cash Received (Inflow)', data: cashInflowData },
+    { name: 'Cash Paid (Outflow)', data: cashOutflowData }
   ];
 
   // 3. Bank Balance Distribution Donut Chart
   const bankDonutOptions: any = {
     chart: { type: 'donut' },
     colors: ['#3C50E0', '#10B981', '#F59E0B', '#8B5CF6', '#EC4899'],
-    labels: metrics.bankAccounts.length > 0 ? metrics.bankAccounts.map((b) => b.accountTitle) : ['Default Bank'],
+    labels: metrics.bankAccounts && metrics.bankAccounts.length > 0 ? metrics.bankAccounts.map((b) => b.accountTitle) : ['Default Bank'],
     legend: { position: 'bottom' },
     tooltip: { y: { formatter: (val: number) => `Rs. ${val.toLocaleString()}` } }
   };
 
-  const bankDonutSeries = metrics.bankAccounts.length > 0
+  const bankDonutSeries = metrics.bankAccounts && metrics.bankAccounts.length > 0
     ? metrics.bankAccounts.map((b) => Math.max(0, b.netBalance))
     : [1];
 
   return (
+
     <div className="mx-auto max-w-7xl flex flex-col gap-6 text-black dark:text-white text-xs">
-      {/* Top Header Banner */}
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-white dark:bg-boxdark p-4 rounded-sm border border-stroke dark:border-strokedark shadow-default">
-        <div>
-          <h2 className="text-xl font-black text-black dark:text-white uppercase tracking-wider flex items-center gap-2">
-            Softhub-PK ERP Software
-          </h2>
-          <p className="text-gray-400 mt-0.5 text-xs font-medium">
-            Live Corporate Financial Dashboard & Real-Time Calculated App Ledgers
-          </p>
+      {/* Top Header Actions */}
+      <div className="flex justify-end items-center gap-3 font-mono text-xs">
+        <div className="bg-white dark:bg-boxdark border border-stroke dark:border-strokedark px-3 py-1.5 rounded font-bold text-gray-600 dark:text-gray-300 shadow-default">
+          {new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
         </div>
-        <div className="flex items-center gap-3 font-mono text-xs">
-          <div className="bg-gray-100 dark:bg-meta-4 px-3 py-1.5 rounded font-bold text-gray-600 dark:text-gray-300">
-            {new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
-          </div>
-          <button
-            onClick={() => navigate('/Reports/Balance-Sheet')}
-            className="bg-primary text-white py-1.5 px-4 rounded font-bold hover:bg-opacity-90 transition shadow-sm cursor-pointer"
-          >
-            Balance Sheet Statement →
-          </button>
-        </div>
-      </div>
-
-      {/* --- TOP ACTION TILES GRID (Matching Reference Interface) --- */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-4 gap-4">
-        {/* ADD SALE */}
-        <div
-          onClick={() => navigate('/sales/invoice/add')}
-          className="bg-[#5B63D3] text-white p-4 rounded shadow hover:opacity-95 transition cursor-pointer flex items-center justify-between"
+        <button
+          onClick={() => navigate('/Reports/Balance-Sheet')}
+          className="bg-primary text-white py-1.5 px-4 rounded font-bold hover:bg-opacity-90 transition shadow-sm cursor-pointer"
         >
-          <div>
-            <span className="block font-extrabold uppercase tracking-wider text-[11px]">ADD SALE</span>
-            <span className="text-[10px] text-white/80">New Customer Bill</span>
-          </div>
-          <MdShoppingCart size={32} className="text-white/80" />
-        </div>
-
-        {/* ADD PURCHASE */}
-        <div
-          onClick={() => navigate('/Purchase/Purchases/Add')}
-          className="bg-[#E74C3C] text-white p-4 rounded shadow hover:opacity-95 transition cursor-pointer flex items-center justify-between"
-        >
-          <div>
-            <span className="block font-extrabold uppercase tracking-wider text-[11px]">ADD PURCHASE</span>
-            <span className="text-[10px] text-white/80">Stock Procurement</span>
-          </div>
-          <MdLocalMall size={32} className="text-white/80" />
-        </div>
-
-        {/* ADD PRODUCT */}
-        <div
-          onClick={() => navigate('/Administration/Products/Add')}
-          className="bg-[#F39C12] text-white p-4 rounded shadow hover:opacity-95 transition cursor-pointer flex items-center justify-between"
-        >
-          <div>
-            <span className="block font-extrabold uppercase tracking-wider text-[11px]">ADD PRODUCT</span>
-            <span className="text-[10px] text-white/80">Catalog Item</span>
-          </div>
-          <MdAddBox size={32} className="text-white/80" />
-        </div>
-
-        {/* STOCK TRANSFER */}
-        <div
-          onClick={() => navigate('/Administration/StockTransfer/Add')}
-          className="bg-[#0088CC] text-white p-4 rounded shadow hover:opacity-95 transition cursor-pointer flex items-center justify-between"
-        >
-          <div>
-            <span className="block font-extrabold uppercase tracking-wider text-[11px]">STOCK TRANSFER</span>
-            <span className="text-[10px] text-white/80">Bin to Warehouse</span>
-          </div>
-          <MdCompareArrows size={32} className="text-white/80" />
-        </div>
-
-        {/* STOCK REPORT */}
-        <div
-          onClick={() => navigate('/Reports/Stock-Report')}
-          className="bg-[#2ECC71] text-white p-4 rounded shadow hover:opacity-95 transition cursor-pointer flex items-center justify-between"
-        >
-          <div>
-            <span className="block font-extrabold uppercase tracking-wider text-[11px]">STOCK REPORT</span>
-            <span className="text-[10px] text-white/80">Inventory Audit</span>
-          </div>
-          <MdAssessment size={32} className="text-white/80" />
-        </div>
-
-        {/* TODAY'S SALE */}
-        <div className="bg-[#17A2B8] text-white p-4 rounded shadow flex items-center justify-between">
-          <div>
-            <span className="block font-extrabold uppercase tracking-wider text-[11px]">TODAY'S SALE</span>
-            <b className="text-lg font-black font-mono">Rs. {metrics.todaysSales.toLocaleString(undefined, { minimumFractionDigits: 2 })}</b>
-          </div>
-          <MdTrendingUp size={32} className="text-white/80" />
-        </div>
-
-        {/* THIS MONTH SALES */}
-        <div className="bg-[#6F42C1] text-white p-4 rounded shadow flex items-center justify-between">
-          <div>
-            <span className="block font-extrabold uppercase tracking-wider text-[11px]">THIS MONTH SALES</span>
-            <b className="text-lg font-black font-mono">Rs. {metrics.thisMonthSales.toLocaleString(undefined, { minimumFractionDigits: 2 })}</b>
-          </div>
-          <MdArrowUpward size={32} className="text-white/80" />
-        </div>
-
-        {/* THIS MONTH PURCHASES */}
-        <div className="bg-[#00C0EF] text-white p-4 rounded shadow flex items-center justify-between">
-          <div>
-            <span className="block font-extrabold uppercase tracking-wider text-[11px]">THIS MONTH PURCHASES</span>
-            <b className="text-lg font-black font-mono">Rs. {metrics.thisMonthPurchases.toLocaleString(undefined, { minimumFractionDigits: 2 })}</b>
-          </div>
-          <MdArrowDownward size={32} className="text-white/80" />
-        </div>
+          Balance Sheet Statement →
+        </button>
+      </div>      {/* --- TOP ACTION TILES GRID (Matching Reference Interface) */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-4 gap-6">
+        <ActionCard title="Add Sale" subtitle="New Customer Bill" Icon={MdShoppingCart} bgGradient="bg-gradient-to-br from-indigo-500 to-indigo-700" onClick={() => navigate('/sales/invoice/add')} />
+        <ActionCard title="Add Purchase" subtitle="Stock Procurement" Icon={MdLocalMall} bgGradient="bg-gradient-to-br from-rose-500 to-rose-600" onClick={() => navigate('/Purchase/Purchases/Add')} />
+        <ActionCard title="Add Product" subtitle="Catalog Item" Icon={MdAddBox} bgGradient="bg-gradient-to-br from-amber-500 to-amber-600" onClick={() => navigate('/Administration/Products/Add')} />
+        <ActionCard title="Stock Transfer" subtitle="Bin to Warehouse" Icon={MdCompareArrows} bgGradient="bg-gradient-to-br from-blue-500 to-blue-600" onClick={() => navigate('/Administration/StockTransfer/Add')} />
+        <ActionCard title="Stock Report" subtitle="Inventory Audit" Icon={MdAssessment} bgGradient="bg-gradient-to-br from-emerald-500 to-emerald-600" onClick={() => navigate('/Reports/Stock-Report')} />
+        <ActionCard title="Today's Sale" subtitle={`Rs. ${metrics.todaysSales.toLocaleString(undefined, { minimumFractionDigits: 2 })}`} Icon={MdTrendingUp} bgGradient="bg-gradient-to-br from-cyan-500 to-cyan-600" onClick={() => { }} />
+        <ActionCard title="This Month Sales" subtitle={`Rs. ${metrics.thisMonthSales.toLocaleString(undefined, { minimumFractionDigits: 2 })}`} Icon={MdArrowUpward} bgGradient="bg-gradient-to-br from-purple-500 to-purple-600" onClick={() => { }} />
+        <ActionCard title="This Month Purchases" subtitle={`Rs. ${metrics.thisMonthPurchases.toLocaleString(undefined, { minimumFractionDigits: 2 })}`} Icon={MdArrowDownward} bgGradient="bg-gradient-to-br from-teal-500 to-teal-600" onClick={() => { }} />
       </div>
 
       {/* --- APP CALCULATED CASH & BANK BALANCES METRICS --- */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        {/* APP CALCULATED CASH BALANCE */}
-        <div className="rounded-sm border border-stroke bg-white p-4 shadow-default dark:border-strokedark dark:bg-boxdark flex items-center justify-between">
-          <div>
-            <span className="text-gray-400 font-bold block uppercase text-[10px]">Calculated Cash Balance</span>
-            <b className="text-emerald-600 text-lg font-black font-mono">Rs. {metrics.cashBalance.toLocaleString(undefined, { minimumFractionDigits: 2 })}</b>
-            <span className="block text-[10px] text-gray-400 font-sans mt-0.5">Counter Cash-Box Liquidity</span>
-          </div>
-          <div className="p-3 bg-emerald-50 dark:bg-emerald-950/20 text-emerald-600 rounded">
-            <MdAccountBalanceWallet size={26} />
-          </div>
-        </div>
-
-        {/* APP CALCULATED MONTHLY BANK BALANCE */}
-        <div className="rounded-sm border border-stroke bg-white p-4 shadow-default dark:border-strokedark dark:bg-boxdark flex items-center justify-between">
-          <div>
-            <span className="text-gray-400 font-bold block uppercase text-[10px]">Monthly Bank Balance</span>
-            <b className="text-primary text-lg font-black font-mono">Rs. {metrics.totalBankBalance.toLocaleString(undefined, { minimumFractionDigits: 2 })}</b>
-            <span className="block text-[10px] text-gray-400 font-sans mt-0.5">{metrics.bankAccounts.length} Corporate Ledgers</span>
-          </div>
-          <div className="p-3 bg-primary/10 text-primary rounded">
-            <MdAccountBalance size={26} />
-          </div>
-        </div>
-
-        {/* ACCOUNTS RECEIVABLE */}
-        <div className="rounded-sm border border-stroke bg-white p-4 shadow-default dark:border-strokedark dark:bg-boxdark flex items-center justify-between">
-          <div>
-            <span className="text-gray-400 font-bold block uppercase text-[10px]">Customer Receivables</span>
-            <b className="text-blue-600 text-lg font-black font-mono">Rs. {metrics.totalReceivables.toLocaleString(undefined, { minimumFractionDigits: 2 })}</b>
-            <span className="block text-[10px] text-gray-400 font-sans mt-0.5">Outstanding Credit Debt</span>
-          </div>
-          <div className="p-3 bg-blue-50 dark:bg-blue-950/20 text-blue-600 rounded">
-            <MdReceiptLong size={26} />
-          </div>
-        </div>
-
-        {/* BALANCE SHEET NET ASSET VALUE */}
-        <div className="rounded-sm border border-stroke bg-white p-4 shadow-default dark:border-strokedark dark:bg-boxdark flex items-center justify-between">
-          <div>
-            <span className="text-gray-400 font-bold block uppercase text-[10px]">Balance Sheet Assets</span>
-            <b className="text-purple-600 text-lg font-black font-mono">Rs. {metrics.totalAssets.toLocaleString(undefined, { minimumFractionDigits: 2 })}</b>
-            <span className="block text-[10px] text-gray-400 font-sans mt-0.5">Total Assets Liquidity</span>
-          </div>
-          <div className="p-3 bg-purple-50 dark:bg-purple-950/20 text-purple-600 rounded">
-            <MdAccountBalance size={26} />
-          </div>
-        </div>
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+        <StatCard
+          title="Calculated Cash Balance"
+          value={metrics.cashBalance}
+          Icon={MdAccountBalanceWallet}
+          bgColor="bg-gradient-to-br from-emerald-500 to-teal-600"
+        />
+        <StatCard
+          title="Monthly Bank Balance"
+          value={metrics.totalBankBalance}
+          Icon={MdAccountBalance}
+          bgColor="bg-gradient-to-br from-primary-500 to-indigo-600"
+        />
+        <StatCard
+          title="Customer Receivables"
+          value={metrics.totalReceivables}
+          Icon={MdReceiptLong}
+          bgColor="bg-gradient-to-br from-blue-500 to-indigo-600"
+        />
+        <StatCard
+          title="Total Assets"
+          value={metrics.totalAssets}
+          Icon={MdAssessment}
+          bgColor="bg-gradient-to-br from-purple-500 to-pink-600"
+        />
       </div>
 
       {/* --- CHARTS SECTION --- */}

@@ -6,10 +6,13 @@ import Spinner from '../../../ui/Spinner';
 import { MdDelete, MdEdit, MdPrint } from 'react-icons/md';
 import { FiSend } from 'react-icons/fi';
 import { buildFBRReturnPayload, syncWithFBR } from '../../../service/fbrService';
+import { useAuth } from '../../../Context/Auth';
 
 const SalesReturnList = () => {
   const navigate = useNavigate();
+  const { tenantId } = useAuth();
   const [returns, setReturns] = useState<any[]>([]);
+
   const [loading, setLoading] = useState(true);
   const [syncingId, setSyncingId] = useState<string | number | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
@@ -204,7 +207,7 @@ const SalesReturnList = () => {
           Sales Return / Debit Notes
         </h2>
         <div className="flex items-center gap-3">
-          <button type="button" onClick={() => navigate('/Sales-Return/Debit-Notes/Add')} className="flex items-center justify-center rounded bg-primary py-2 px-4 text-sm font-medium text-white hover:bg-opacity-90 transition duration-150 shadow-sm cursor-pointer" >
+          <button type="button" onClick={() => navigate(`${tenantId ? `/${tenantId}` : ''}/Sales-Return/Debit-Notes/Add`)} className="flex items-center justify-center rounded bg-primary py-2 px-4 text-sm font-medium text-white hover:bg-opacity-90 transition duration-150 shadow-sm cursor-pointer" >
             + Add New
           </button>
         </div>
@@ -236,7 +239,7 @@ const SalesReturnList = () => {
                 <th className="py-4 px-4 font-semibold text-sm w-28">Orig. Inv No</th>
                 <th className="py-4 px-4 font-semibold text-sm">Sale Return Date</th>
                 <th className="py-4 px-4 font-semibold text-sm">Customer</th>
-                <th className="py-4 px-4 font-semibold text-sm w-28">Return Status</th>
+                <th className="py-4 px-4 font-semibold text-sm w-36">Return Status</th>
                 <th className="py-4 px-4 font-semibold text-sm text-center w-36">FBR Tax Code</th>
                 <th className="py-4 px-4 font-semibold text-sm text-right">Total Amount</th>
                 <th className="py-4 px-4 font-semibold text-sm w-14 text-center">Action</th>
@@ -254,6 +257,23 @@ const SalesReturnList = () => {
                   const displayInvoiceNo = rawInvoiceStr.toUpperCase().startsWith('INV-') ? rawInvoiceStr : `INV-${rawInvoiceStr}`;
                   const isFbrPosted = !!(ret.fbr_fiscal_number && String(ret.fbr_fiscal_number).trim() !== 'Unposted');
 
+                  const payout = Number(ret.payout_amount_paid || 0);
+                  const total = Number(ret.total_amount || 0);
+                  const isFullPaid = ret.return_status === 'Paid' || (payout > 0 && payout >= total - 0.01);
+                  const isPartialPaid = !isFullPaid && payout > 0;
+
+                  let statusLabel = 'Credit Settled';
+                  let badgeClass = 'bg-primary text-white';
+
+                  if (isFullPaid) {
+                    statusLabel = ret.settlement_mode === 'Bank' ? 'Bank Refund' : 'Cash Refund';
+                    badgeClass = 'bg-success text-white';
+                  } else if (isPartialPaid) {
+                    statusLabel = `Partial Refund (Rs. ${payout.toFixed(2)})`;
+                    badgeClass = 'bg-amber-500 text-white';
+                  }
+
+
                   return (
                     <tr key={ret.id} className="border-b border-stroke dark:border-strokedark hover:bg-slate-50 dark:hover:bg-meta-4/10 duration-150 text-sm">
                       <td className="py-3.5 px-4 text-black dark:text-white font-medium">{serialNumber}</td>
@@ -262,10 +282,12 @@ const SalesReturnList = () => {
                       <td className="py-3.5 px-4 text-gray-500 whitespace-nowrap">{ret.return_date ? ret.return_date : new Date(ret.created_at).toLocaleDateString()}</td>
                       <td className="py-3.5 px-4 font-medium text-black dark:text-white">{ret.customer_name}</td>
                       <td className="py-3.5 px-4">
-                        <span className={`inline-flex rounded-sm py-0.5 px-2 text-xs font-bold text-white uppercase tracking-wide ${ret.return_status === 'Paid' ? 'bg-success' : 'bg-amber-500'}`}>
-                          {ret.return_status || 'On Credit'}
+                        <span className={`inline-flex rounded-sm py-0.5 px-2 text-[11px] font-bold uppercase tracking-wide ${badgeClass}`}>
+                          {statusLabel}
                         </span>
                       </td>
+
+
 
                       <td className="py-3.5 px-4 text-center whitespace-nowrap">
                         <span className={`font-bold font-mono text-xs ${isFbrPosted ? 'text-success' : 'text-gray-400'}`}>
@@ -335,7 +357,7 @@ const SalesReturnList = () => {
                 <li>
                   <button
                     type="button"
-                    onClick={() => { setOpenActionId(null); navigate(`/Sales-Return/Debit-Notes/Print/${selectedReturn.id}`); }}
+                    onClick={() => { setOpenActionId(null); navigate(`${tenantId ? `/${tenantId}` : ''}/Sales-Return/Debit-Notes/Print/${selectedReturn.id}`); }}
                     className="flex items-center gap-2.5 w-full px-4 py-2 hover:bg-gray-100 dark:hover:bg-meta-4 transition border-b border-stroke dark:border-strokedark text-blue-500 cursor-pointer"
                   >
                     <MdPrint size={14} /> Print Note
@@ -344,12 +366,13 @@ const SalesReturnList = () => {
                 <li>
                   <button
                     type="button"
-                    onClick={() => { setOpenActionId(null); navigate('/Sales-Return/Debit-Notes/Add', { state: { invoice: selectedReturn } }); }}
+                    onClick={() => { setOpenActionId(null); navigate(`${tenantId ? `/${tenantId}` : ''}/Sales-Return/Debit-Notes/Add`, { state: { invoice: selectedReturn } }); }}
                     className="flex items-center gap-2.5 w-full px-4 py-2 hover:bg-gray-100 dark:hover:bg-meta-4 transition text-yellow-600 cursor-pointer"
                   >
                     <MdEdit size={14} /> Edit Record
                   </button>
                 </li>
+
                 <li>
                   <button
                     type="button"

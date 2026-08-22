@@ -3,10 +3,13 @@ import { useNavigate } from 'react-router-dom';
 import { supabase } from '../../../Context/supabaseClient';
 import { toast } from 'react-hot-toast';
 import Spinner from '../../../ui/Spinner';
+import { useAuth } from '../../../Context/Auth';
 
 const StockReport = () => {
   const navigate = useNavigate();
+  const { tenantId } = useAuth();
   const [loading, setLoading] = useState(true);
+
   const [activeTab, setActiveTab] = useState<1 | 2 | 3 | 4 | 5 | 6 | 7 | 8>(1);
 
   const [categories, setCategories] = useState<any[]>([]);
@@ -37,7 +40,13 @@ const StockReport = () => {
         const { data: prod } = await supabase.from('products').select('id, product_name, category, brand, uom');
         const { data: loc } = await supabase.from('inventory_locations').select('id, name');
         const { data: emp } = await supabase.from('salesmen').select('id, name');
-        const { data: uomData } = await supabase.from('inventory_uom').select('id, short_code, full_name').eq('is_active', true);
+        const { data: uomData } = await supabase
+          .from('inventory_uom')
+          .select('id, short_code, full_name')
+          .eq('tenant_id', tenantId || 'bashir')
+          .eq('is_active', true);
+
+
 
         if (cat) setCategories(cat);
         if (brnd) setBrands(brnd);
@@ -76,10 +85,11 @@ const StockReport = () => {
   };
 
   const handleDispatchReportView = () => {
-    navigate('/Reports/Stock-Report/Print', {
+    navigate(`${tenantId ? `/${tenantId}` : ''}/Reports/Stock-Report/Print`, {
       state: { tab: activeTab, filters: criteria }
     });
   };
+
 
   if (loading) return <div className="flex h-48 items-center justify-center"><Spinner /></div>;
   return (

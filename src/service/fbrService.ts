@@ -37,8 +37,38 @@ export interface FBRInvoicePayload {
   items: FBRItemPayload[];
 }
 
-const FBR_SANDBOX_URL = 'https://gw.fbr.gov.pk/di_data/v1/di/postinvoicedata_sb';
-const FBR_PRODUCTION_URL = 'https://gw.fbr.gov.pk/di_data/v1/di/postinvoicedata';
+// TODO: Configure the client's actual FBR API URLs and Token here when going live.
+export const FBR_CONFIG = {
+  // Authentication Token provided by FBR Iris
+  BEARER_TOKEN: 'YOUR_FBR_IRIS_BEARER_TOKEN', // Replace when going live
+
+  // Main Invoice Posting APIs
+  INVOICE: {
+    SANDBOX: 'https://gw.fbr.gov.pk/di_data/v1/di/postinvoicedata_sb',
+    PRODUCTION: 'https://gw.fbr.gov.pk/di_data/v1/di/postinvoicedata',
+  },
+
+  // Invoice Validation APIs (Checks data without officially posting)
+  VALIDATION: {
+    SANDBOX: 'https://gw.fbr.gov.pk/di_data/v1/di/validateinvoicedata_sb',
+    PRODUCTION: 'https://gw.fbr.gov.pk/di_data/v1/di/validateinvoicedata',
+  },
+
+  // Reference Data APIs (Lookup FBR tables)
+  REFERENCE: {
+    PROVINCES: 'https://gw.fbr.gov.pk/pdi/v1/provinces',
+    DOCUMENT_TYPE: 'https://gw.fbr.gov.pk/pdi/v1/doctypecode',
+    ITEM_CODE: 'https://gw.fbr.gov.pk/pdi/v1/itemdesccode',
+    SRO_ITEM_ID: 'https://gw.fbr.gov.pk/pdi/v1/sroitemcode',
+    TRANSACTION_TYPE: 'https://gw.fbr.gov.pk/pdi/v1/transtypecode',
+    UOM: 'https://gw.fbr.gov.pk/pdi/v1/uom',
+    SRO_SCHEDULE: 'https://gw.fbr.gov.pk/pdi/v1/SroSchedule', // Requires query params
+    TAX_RATES: 'https://gw.fbr.gov.pk/pdi/v2/SaleTypeToRate', // Requires query params
+    HS_UOM: 'https://gw.fbr.gov.pk/pdi/v2/HS_UOM', // Requires query params
+    STATL: 'https://gw.fbr.gov.pk/dist/v1/statl',
+    STATL_REG_TYPE: 'https://gw.fbr.gov.pk/dist/v1/Get_Reg_Type',
+  }
+};
 
 const mapFBRScenario = (scenarioStr: string, isRegistered: boolean) => {
   const s = String(scenarioStr || '').toLowerCase();
@@ -81,10 +111,17 @@ export const buildFBRInvoicePayload = (inv: any): FBRInvoicePayload => {
     const gstRate = Number(item.gstRate || item.gst_rate || 18);
     const fTax = Number(item.fTaxPer || item.f_tax_per || 0);
 
+    const discount = Number(item.discount || item.discountAmt || item.discount_amt || 0);
     const baseExcl = rp * qty;
-    const salesTaxAmount = (baseExcl * gstRate) / 100;
-    const furtherTaxAmount = (baseExcl * fTax) / 100;
-    const totalItemValue = baseExcl + salesTaxAmount + furtherTaxAmount;
+    const isRetailBasedTax =
+      String(scenarioInfo.saleType || '').toLowerCase().includes('3rd schedule') ||
+      String(scenarioInfo.saleType || '').toLowerCase().includes('sro 297');
+    const is3rdSch = String(scenarioInfo.saleType || '').toLowerCase().includes('3rd schedule');
+    const taxableBase = isRetailBasedTax ? baseExcl : Math.max(0, baseExcl - discount);
+
+    const salesTaxAmount = (taxableBase * gstRate) / 100;
+    const furtherTaxAmount = (taxableBase * fTax) / 100;
+    const totalItemValue = (baseExcl - discount) + salesTaxAmount + furtherTaxAmount;
 
     const extractedHsCode = String(item.hsCode || item.hs_code || item.hsCodeNo || item.hscode || item.hs_Code || item.hsNo || '').trim();
 
@@ -95,15 +132,15 @@ export const buildFBRInvoicePayload = (inv: any): FBRInvoicePayload => {
       uoM: item.uom || 'Numbers, pieces, units',
       quantity: qty,
       totalValues: Math.round(totalItemValue * 100) / 100,
-      valueSalesExcludingST: Math.round(baseExcl * 100) / 100,
-      fixedNotifiedValueOrRetailPrice: 0,
+      valueSalesExcludingST: Math.round(taxableBase * 100) / 100,
+      fixedNotifiedValueOrRetailPrice: is3rdSch ? rp : 0,
       salesTaxApplicable: Math.round(salesTaxAmount * 100) / 100,
       salesTaxWithheldAtSource: 0,
       extraTax: 0,
       furtherTax: Math.round(furtherTaxAmount * 100) / 100,
       sroScheduleNo: '',
       fedPayable: 0,
-      discount: Number(item.discount || 0),
+      discount: discount,
       saleType: scenarioInfo.saleType,
       sroItemSerialNo: ''
     };
@@ -115,7 +152,7 @@ export const buildFBRInvoicePayload = (inv: any): FBRInvoicePayload => {
     invoiceType: 'Sale Invoice',
     invoiceDate: inv.created_at ? new Date(inv.created_at).toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
     sellerNTNCNIC: configuredSellerNTN,
-    sellerBusinessName: inv.seller_name || 'Softhub-PK ERP Systems',
+    sellerBusinessName: inv.seller_name || 'NOOR HORIZON TECHNOLOGIES',
     sellerProvince: inv.seller_province || 'Sindh',
     sellerAddress: inv.seller_address || 'Karachi, Pakistan',
     buyerNTNCNIC: isRegisteredBuyer ? rawBuyerId : '',
@@ -179,7 +216,7 @@ export const buildFBRReturnPayload = (ret: any): FBRInvoicePayload => {
     invoiceType: 'Debit Note',
     invoiceDate: ret.return_date || new Date().toISOString().split('T')[0],
     sellerNTNCNIC: configuredSellerNTN,
-    sellerBusinessName: ret.seller_name || 'Softhub-PK ERP Systems',
+    sellerBusinessName: ret.seller_name || 'NOOR HORIZON TECHNOLOGIES',
     sellerProvince: ret.seller_province || 'Sindh',
     sellerAddress: ret.seller_address || 'Karachi, Pakistan',
     buyerNTNCNIC: isRegisteredBuyer ? rawBuyerId : '',
@@ -202,14 +239,18 @@ export const syncWithFBR = async (payload: FBRInvoicePayload, isSandbox: boolean
     throw new Error('Offline Error: Internet connection lost. Please reconnect and try posting again.');
   }
 
-  const targetUrl = isSandbox ? FBR_SANDBOX_URL : FBR_PRODUCTION_URL;
+  const targetUrl = isSandbox ? FBR_CONFIG.INVOICE.SANDBOX : FBR_CONFIG.INVOICE.PRODUCTION;
+
+  if (!targetUrl) {
+    throw new Error('FBR API URL is not configured. Please set INVOICE.SANDBOX or INVOICE.PRODUCTION in the FBR_CONFIG object in fbrService.ts');
+  }
 
   try {
     const response = await fetch(targetUrl, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': 'Bearer 3abdd5c9-08cb-3f81-9a8b-331e9282f911' // FBR Iris Sandbox Security Token
+        'Authorization': `Bearer ${FBR_CONFIG.BEARER_TOKEN}`
       },
       body: JSON.stringify(payload)
     });
@@ -220,10 +261,10 @@ export const syncWithFBR = async (payload: FBRInvoicePayload, isSandbox: boolean
       try {
         const jsonErr = JSON.parse(errorText);
         parsedErr = jsonErr.validationResponse?.error || jsonErr.message || jsonErr.error || JSON.stringify(jsonErr);
-      } catch (_) {}
+      } catch (_) { }
 
       if (parsedErr?.includes('seller registration number') || parsedErr?.includes('0401') || response.status === 401) {
-        throw new Error('FBR Authorization Error (401): The Seller NTN/CNIC in your invoice does not match the NTN/CNIC registered on your FBR Iris Security Token (3abdd5c9...).');
+        throw new Error('FBR Authorization Error (401): The Seller NTN/CNIC in your invoice does not match the NTN/CNIC registered on your FBR Iris Security Token.');
       }
 
       throw new Error(`FBR Gateway Error (${response.status}): ${parsedErr}`);
@@ -252,11 +293,11 @@ export const syncWithFBR = async (payload: FBRInvoicePayload, isSandbox: boolean
     } else {
       const errCode = valResp?.statusCode || 'VAL_ERR';
       const errMsg = valResp?.error || valResp?.invoiceStatuses?.[0]?.error || 'Invoice payload failed FBR validation checks.';
-      
+
       if (errCode === '0401' || errMsg?.includes('seller registration number')) {
         throw new Error('FBR Authorization Error (401): Seller NTN/CNIC does not match the NTN/CNIC registered on your FBR Iris Bearer Token.');
       }
-      
+
       throw new Error(`FBR Validation Error [${errCode}]: ${errMsg}`);
     }
   } catch (err: any) {

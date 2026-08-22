@@ -1,0 +1,16 @@
+version: '3.8'
+
+services:
+  erp-frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        VITE_SUPABASE_URL: ${VITE_SUPABASE_URL:-https://api.noorhorizontechnologies.com}
+        VITE_SUPABASE_ANON_KEY: ${VITE_SUPABASE_ANON_KEY:-your_anon_key_here}
+    container_name: nht_erp_frontend
+    restart: always
+    ports:
+      - "3000:80"
+    environment:
+      - NODE_ENV=production

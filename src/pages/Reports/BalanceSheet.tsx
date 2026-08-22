@@ -2,10 +2,13 @@ import React, { useEffect, useState } from 'react';
 import { fetchFinancialMetrics, FinancialSummary } from '../../service/financialCalculations';
 import Spinner from '../../ui/Spinner';
 import { MdAccountBalance, MdAccountBalanceWallet, MdMonetizationOn, MdInventory, MdTrendingUp, MdAssignmentReturn, MdPrint } from 'react-icons/md';
+import { useAuth } from '../../Context/Auth';
 
 const BalanceSheet: React.FC = () => {
+  const { businessName } = useAuth();
   const [metrics, setMetrics] = useState<FinancialSummary | null>(null);
   const [loading, setLoading] = useState(true);
+
   const [asOfDate, setAsOfDate] = useState(new Date().toISOString().split('T')[0]);
 
   const loadData = async () => {
@@ -87,10 +90,11 @@ const BalanceSheet: React.FC = () => {
       <div className="balance-sheet-print-container flex flex-col gap-6">
         {/* Printable Header */}
         <div className="hidden print:block text-center mb-6">
-          <h1 className="text-2xl font-black text-black uppercase tracking-wider">SOFTHUB-PK ERP SOFTWARE</h1>
+          <h1 className="text-2xl font-black text-black uppercase tracking-wider">{businessName ? businessName.toUpperCase() : 'NOOR HORIZON TECHNOLOGIES ERP'}</h1>
           <h2 className="text-lg font-bold text-gray-700">CORPORATE BALANCE SHEET STATEMENT</h2>
           <p className="text-xs text-gray-500 font-mono">As of {asOfDate}</p>
         </div>
+
 
       {/* Balance Verification Banner */}
       <div className="rounded-sm border border-stroke bg-white dark:bg-boxdark p-4 shadow-default flex flex-col sm:flex-row items-center justify-between gap-4">
@@ -261,9 +265,28 @@ const BalanceSheet: React.FC = () => {
           </div>
         </div>
         </div>
+
+        <div className="mt-20 hidden print:grid grid-cols-3 gap-12 text-center text-[9px] font-sans font-black uppercase tracking-widest text-gray-400">
+          <div className="border-t border-black pt-2">Prepared By: Financial Controller</div>
+          <div className="border-t border-black pt-2">Verified By: Chartered Accountant / Auditor</div>
+          <div className="border-t border-black pt-2">Authorized Executive Director Seal</div>
+        </div>
+
+        {/* 🏢 Software & Corporate Provider Footer */}
+        <div className="mt-8 pt-3 border-t border-gray-300 flex justify-between items-center text-[10px] text-gray-600 font-sans print:border-gray-400">
+          <div className="flex items-center gap-2 font-bold">
+            <span className="text-black font-black uppercase">{businessName ? `${businessName.toUpperCase()} • ` : ''}NOOR HORIZON TECHNOLOGIES</span>
+            <span className="text-gray-400">|</span>
+            <span className="text-gray-700">Contact: <b className="text-black font-bold">03128039911</b></span>
+          </div>
+          <div className="text-[9px] text-gray-400 font-mono">
+            System Generated Statement • Soft-Hub ERP
+          </div>
+        </div>
       </div>
     </div>
   );
 };
 
 export default BalanceSheet;
+

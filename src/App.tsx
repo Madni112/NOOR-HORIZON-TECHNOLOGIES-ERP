@@ -14,9 +14,25 @@ function App() {
     <AuthProvider>
       <ModalProvider>
         <Navigation />
-        <Toaster 
-         toastOptions={{
-        duration: 1500, }}  />
+        <Toaster
+          position="top-center"
+          toastOptions={{
+            duration: 4000,
+            style: {
+              fontSize: '13px',
+              fontWeight: 500,
+              padding: '12px 16px',
+              borderRadius: '8px',
+              maxWidth: '500px',
+            },
+            success: {
+              duration: 3500,
+            },
+            error: {
+              duration: 5000,
+            },
+          }}
+        />
         <Alert />
       </ModalProvider>
     </AuthProvider>
@@ -24,3 +40,5 @@ function App() {
 }
 
 export default App;
+
+

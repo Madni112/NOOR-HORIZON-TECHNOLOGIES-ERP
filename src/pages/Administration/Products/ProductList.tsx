@@ -18,14 +18,18 @@ const ProductList = () => {
     fetchInventoryProducts();
   }, []);
 
+
   const fetchInventoryProducts = async () => {
     try {
       setLoading(true);
 
-      const { data: baseProducts, error } = await supabase
+      // Query products
+      let query = supabase
         .from('products')
         .select('*')
         .order('created_at', { ascending: false });
+
+      const { data: baseProducts, error } = await query;
 
       if (error) throw error;
 
@@ -128,6 +132,8 @@ const ProductList = () => {
     p.category?.toLowerCase().includes(searchTerm.toLowerCase()) ||
     p.brand?.toLowerCase().includes(searchTerm.toLowerCase())
   );
+
+
 
   const totalEntries = filteredProducts.length;
   const totalPages = Math.ceil(totalEntries / pageSize);

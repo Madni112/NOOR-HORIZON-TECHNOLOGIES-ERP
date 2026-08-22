@@ -5,14 +5,18 @@ import * as Yup from 'yup';
 import { supabase } from '../../../Context/supabaseClient';
 import { toast } from 'react-hot-toast';
 import Spinner from '../../../ui/Spinner';
+import { useAuth } from '../../../Context/Auth';
 
 function AddInvoiceReceipt() {
+  const { tenantId } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
   const [loading, setLoading] = useState(false);
 
+
   const [invoiceOptions, setInvoiceOptions] = useState<any[]>([]);
   const [bankAccounts, setBankAccounts] = useState<any[]>([]);
+  const [coaAccounts, setCoaAccounts] = useState<any[]>([]);
   const [invoiceTotal, setInvoiceTotal] = useState<number>(0);
   const [remainingBalance, setRemainingBalance] = useState<number>(0);
   const [totalReturnedCredit, setTotalReturnedCredit] = useState<number>(0);
@@ -34,8 +38,10 @@ function AddInvoiceReceipt() {
         const { data: returnRecords } = await supabase.from('sales_returns').select('original_invoice_no, total_amount');
         const { data: pastReceipts } = await supabase.from('financial_vouchers').select('id, original_invoice_no, total_amount').or('voucher_type.eq.Cash Receipt Voucher,voucher_type.eq.Bank Receipt Voucher');
         const { data: bankData } = await supabase.from('banks').select('id, bankName, accountTitle, accountNumber');
+        const { data: coaData } = await supabase.from('chart_of_accounts').select('account_code, account_title, control_code, category_code');
 
         if (bankData) setBankAccounts(bankData);
+        if (coaData) setCoaAccounts(coaData);
 
         if (invData) {
           const currentEditId = editData?.id || null;
@@ -180,8 +186,9 @@ function AddInvoiceReceipt() {
       <div className="rounded-sm border border-stroke bg-white shadow-default dark:border-strokedark dark:bg-boxdark">
         <div className="flex items-center justify-between border-b border-stroke py-4 px-6.5 dark:border-strokedark">
           <h3 className="font-semibold text-black dark:text-white text-base">Invoice Receipt Processing Wizard</h3>
-          <button type="button" onClick={() => navigate('/Registration/InvoiceReceipt/List')} className="text-sm font-medium text-primary hover:underline cursor-pointer">See List</button>
+          <button type="button" onClick={() => navigate(`${tenantId ? `/${tenantId}` : ''}/Registration/InvoiceReceipt/List`)} className="text-sm font-medium text-primary hover:underline cursor-pointer">See List</button>
         </div>
+
 
         <div className="p-6">
           <Formik
@@ -229,12 +236,38 @@ function AddInvoiceReceipt() {
 
                 try {
                   setLoading(true);
-                  const cashAmt = enteredAmount;
-                  const assetAccountCode = values.paymentTerm === 'By Cash' ? '1002001' : '1002002';
+                  // Dynamically resolve COA account codes from live Supabase records
+                  const cashCoa = coaAccounts.find((c: any) =>
+                    String(c.control_code || '').toLowerCase().includes('cash') ||
+                    String(c.account_title || '').toLowerCase().includes('cash')
+                  );
+
+                  const selectedBankObj = bankAccounts.find((b: any) => String(b.id) === String(values.selectedBankId));
+                  const bankCoa = coaAccounts.find((c: any) =>
+                    (selectedBankObj && (
+                      String(c.linked_bank_id) === String(selectedBankObj.id) ||
+                      String(c.account_code) === String(selectedBankObj.accountNumber) ||
+                      String(c.account_title || '').toLowerCase().includes(String(selectedBankObj.bankName || '').toLowerCase())
+                    )) ||
+                    String(c.control_code || '').toLowerCase().includes('bank')
+                  );
+
+                  const recCoa = coaAccounts.find((c: any) =>
+                    String(c.control_code || '').toLowerCase().includes('debtor') ||
+                    String(c.control_code || '').toLowerCase().includes('receivable') ||
+                    String(c.account_title || '').toLowerCase().includes('receivable')
+                  );
+
+                  const assetAccountCode = values.paymentTerm === 'By Cash'
+                    ? (cashCoa ? String(cashCoa.account_code) : '1010')
+                    : (bankCoa ? String(bankCoa.account_code) : (selectedBankObj?.accountNumber || '1015'));
+
+
+                  const customerAccountCode = recCoa ? String(recCoa.account_code) : (cashCoa ? String(cashCoa.account_code) : '1010');
 
                   const balancedJournalItems = [
-                    { accountCode: assetAccountCode, salesman: salesman, description: `Received via INV-${selectedInvoiceId}`, debit: cashAmt, credit: 0 },
-                    { accountCode: '1001001', salesman: salesman, description: `Debt cleared against INV-${selectedInvoiceId}`, debit: 0, credit: cashAmt }
+                    { accountCode: assetAccountCode, salesman: salesman, description: `Received via INV-${selectedInvoiceId}`, debit: enteredAmount, credit: 0 },
+                    { accountCode: customerAccountCode, salesman: salesman, description: `Debt cleared against INV-${selectedInvoiceId}`, debit: 0, credit: enteredAmount }
                   ];
 
                   const bankTrackingString = values.paymentTerm === 'By Bank' ? ` | Bank ID: ${values.selectedBankId}` : '';
@@ -250,7 +283,7 @@ function AddInvoiceReceipt() {
                     salesman: salesman,
                     narration: compositeNarration,
                     notes: compositeNarration,
-                    total_amount: cashAmt,
+                    total_amount: enteredAmount,
                     items: balancedJournalItems,
                     metadata: { selectedBankId: values.selectedBankId }
                   };
@@ -261,11 +294,11 @@ function AddInvoiceReceipt() {
 
                   if (error) throw error;
 
-                  const netOutstandingAfterPayment = remainingBalance - cashAmt;
+                  const netOutstandingAfterPayment = remainingBalance - enteredAmount;
                   let targetStatusString = 'Partial';
                   if (netOutstandingAfterPayment <= 1) {
                     targetStatusString = 'Paid';
-                  } else if (cashAmt === 0) {
+                  } else if (enteredAmount === 0) {
                     targetStatusString = 'Unpaid';
                   }
 
@@ -275,7 +308,8 @@ function AddInvoiceReceipt() {
                     .eq('id', Number(selectedInvoiceId));
 
                   toast.success('Invoice receipt processed successfully!');
-                  navigate('/Registration/InvoiceReceipt/List');
+                  navigate(`${tenantId ? `/${tenantId}` : ''}/Registration/InvoiceReceipt/List`);
+
                 } catch (err: any) {
                   toast.error(err.message);
                 } finally {
@@ -416,8 +450,9 @@ function AddInvoiceReceipt() {
                   </div>
 
                   <div className="flex justify-end gap-4 pt-4 border-t border-stroke dark:border-strokedark">
-                    <button type="button" onClick={() => navigate('/Registration/InvoiceReceipt/List')} className="rounded bg-danger py-2.5 px-8 font-medium text-white hover:bg-opacity-90 transition text-xs shadow-sm h-10 min-w-36 cursor-pointer" >Cancel</button>
+                    <button type="button" onClick={() => navigate(`${tenantId ? `/${tenantId}` : ''}/Registration/InvoiceReceipt/List`)} className="rounded bg-danger py-2.5 px-8 font-medium text-white hover:bg-opacity-90 transition text-xs shadow-sm h-10 min-w-36 cursor-pointer" >Cancel</button>
                     <button type="button" onClick={handleValidateAndSubmit} className={`rounded ${isEditMode ? 'bg-success' : 'bg-primary'} py-2.5 px-10 font-bold text-white hover:bg-opacity-90 transition text-xs shadow-sm h-10 min-w-36 cursor-pointer font-semibold`} >
+
                       {loading ? <Spinner /> : isEditMode ? 'Update Receipt' : 'Record Receipt'}
                     </button>
                   </div>

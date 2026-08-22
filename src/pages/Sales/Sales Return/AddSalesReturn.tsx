@@ -5,8 +5,10 @@ import { toast } from 'react-hot-toast';
 import { supabase } from '../../../Context/supabaseClient';
 import Spinner from '../../../ui/Spinner';
 import { useNavigate, useLocation } from 'react-router-dom';
+import { useAuth } from '../../../Context/Auth';
 
 const AddSalesReturn = () => {
+  const { tenantId } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
 
@@ -38,6 +40,50 @@ const AddSalesReturn = () => {
     cashReceivedBox: isDirectInvoiceLink && routeStateData ? Number(routeStateData.cash_amount_paid || 0) : 0
   });
 
+  const syncInvoicePaymentMetrics = async (invoiceId: string | number, invObj?: any) => {
+    const cleanId = String(invoiceId || '').replace(/\D/g, '');
+    if (!cleanId) {
+      setOrigInvoiceCashMetrics({ grandTotal: 0, cashReceivedBox: 0 });
+      return;
+    }
+
+    try {
+      let inv = invObj;
+      if (!inv) {
+        const { data } = await supabase.from('sales_invoices').select('*').eq('id', Number(cleanId)).maybeSingle();
+        inv = data;
+      }
+      if (!inv) return;
+
+      const upfrontCash = Number(inv.cash_amount_paid || 0);
+      const upfrontBank = Number(inv.bank_amount || 0) + (Array.isArray(inv.bankPayments) ? inv.bankPayments.reduce((sum: number, b: any) => sum + (Number(b.bankAmount) || 0), 0) : 0);
+
+      // Fetch subsequent receipt vouchers
+      const { data: vouchers } = await supabase
+        .from('financial_vouchers')
+        .select('total_amount')
+        .or('voucher_type.eq.Cash Receipt Voucher,voucher_type.eq.Bank Receipt Voucher')
+        .or(`original_invoice_no.eq.${cleanId},original_invoice_no.eq.INV-${cleanId}`);
+
+      const subsequentCollected = (vouchers || []).reduce((sum: number, v: any) => sum + (Number(v.total_amount) || 0), 0);
+      const totalPaid = upfrontCash + upfrontBank + subsequentCollected;
+
+      setOrigInvoiceCashMetrics({
+        grandTotal: Number(inv.total_amount || 0),
+        cashReceivedBox: totalPaid
+      });
+
+      if (inv.dispatch_warehouse) {
+        setOrigInvoiceWarehouse(inv.dispatch_warehouse);
+      }
+    } catch (err) {
+      console.error('Failed to sync invoice payment metrics:', err);
+    }
+  };
+
+  const [origInvoiceWarehouse, setOrigInvoiceWarehouse] = useState<string>('Wearhouse A');
+
+
   const [returnInitData, setReturnInitData] = useState<any>({
     returnNo: isEditMode ? `RTN-${String(routeStateData.id).padStart(4, '0')}` : '(Auto Generated)',
     returnDate: routeStateData?.return_date || new Date().toISOString().split('T')[0],
@@ -54,8 +100,9 @@ const AddSalesReturn = () => {
         setInitialLoading(true);
         const { data: invoicesData } = await supabase
           .from('sales_invoices')
-          .select('id, customer_name, total_amount, cash_amount_paid, items')
+          .select('id, customer_name, total_amount, cash_amount_paid, bank_amount, selected_bank, bankPayments, items, dispatch_warehouse')
           .order('id', { ascending: false });
+
 
         const { data: bankAccounts } = await supabase
           .from('banks')
@@ -71,10 +118,7 @@ const AddSalesReturn = () => {
         if (lookupId && invoicesData) {
           const matchedInv = invoicesData.find(i => String(i.id) === String(lookupId));
           if (matchedInv) {
-            setOrigInvoiceCashMetrics({
-              grandTotal: Number(matchedInv.total_amount || 0),
-              cashReceivedBox: Number(matchedInv.cash_amount_paid || 0)
-            });
+            await syncInvoicePaymentMetrics(lookupId, matchedInv);
           }
         }
 
@@ -87,7 +131,7 @@ const AddSalesReturn = () => {
           setIsSelectionMade(true);
           setIsDropdownOpen(false);
 
-          // ✅ THE FIX: Explicitly queries your true sales_returns table to capture your real saved payout value
+          // Explicitly queries sales_returns table to capture real saved payout value
           const { data: actualReturnRecord } = await supabase
             .from('sales_returns')
             .select('payout_amount_paid, total_amount')
@@ -103,14 +147,13 @@ const AddSalesReturn = () => {
             customerName: routeStateData.customer_name || '',
             settlementMode: routeStateData.settlement_mode || 'Cash',
             selectedBankAccountId: routeStateData.linked_bank_title || '',
-            // ✅ FORCES FORMIK TO INITIALIZE UN-MUTATED FIELD VALUE (7200)
             payoutAmountPaid: realPayout,
             items: routeStateData.items || []
           });
         } else if (isDirectInvoiceLink && routeStateData) {
           setInvoiceSearchQuery(`INV-${routeStateData.id} (${routeStateData.customer_name || ''})`);
           setIsSelectionMade(true);
-          verifyInvoiceReturnStateGuard(routeStateData.id);
+          await loadInvoiceAndComputeReturnableItems(routeStateData.id, routeStateData);
         }
       } catch (err: any) {
         toast.error('Failed to load tracking data registers: ' + err.message);
@@ -120,6 +163,96 @@ const AddSalesReturn = () => {
     };
     fetchMetadataCatalog();
   }, [routeStateData, isEditMode, isDirectInvoiceLink]);
+
+  const loadInvoiceAndComputeReturnableItems = async (invoiceId: string | number, invObj?: any, setFieldValue?: any) => {
+    const cleanId = String(invoiceId || '').replace(/\D/g, '');
+    if (!cleanId) return;
+
+    try {
+      let inv = invObj;
+      if (!inv) {
+        const { data } = await supabase.from('sales_invoices').select('*').eq('id', Number(cleanId)).maybeSingle();
+        inv = data;
+      }
+      if (!inv) return;
+
+      // 1. Fetch previous returns for this invoice
+      let query = supabase
+        .from('sales_returns')
+        .select('id, items')
+        .or(`original_invoice_no.eq.${cleanId},original_invoice_no.eq.INV-${cleanId},original_invoice_no.eq.INV-${cleanId.padStart(4, '0')}`);
+
+      if (isEditMode && routeStateData?.id) {
+        query = query.neq('id', routeStateData.id);
+      }
+
+      const { data: previousReturns } = await query;
+
+      // 2. Map already returned quantities per product
+      const alreadyReturnedQtyMap: Record<string, number> = {};
+      (previousReturns || []).forEach((ret: any) => {
+        (ret.items || []).forEach((item: any) => {
+          const key = String(item.itemName || item.product_name || item.name || '').trim().toLowerCase();
+          if (key) {
+            alreadyReturnedQtyMap[key] = (alreadyReturnedQtyMap[key] || 0) + (Number(item.qty) || 0);
+          }
+        });
+      });
+
+      // 3. Compute remaining returnable quantities
+      const returnableItems: any[] = [];
+      (inv.items || []).forEach((origItem: any) => {
+        const key = String(origItem.itemName || origItem.product_name || origItem.name || '').trim().toLowerCase();
+        const origQty = Number(origItem.qty) || 0;
+        const returnedQtySoFar = alreadyReturnedQtyMap[key] || 0;
+        const remainingQty = Math.max(0, origQty - returnedQtySoFar);
+
+        if (remainingQty > 0 || isEditMode) {
+          returnableItems.push({
+            ...origItem,
+            soldQty: isEditMode ? origQty : remainingQty,
+            maxQty: isEditMode ? origQty : remainingQty,
+            qty: isEditMode ? (Number(origItem.qty) || 1) : remainingQty
+          });
+        }
+      });
+
+      const isFullyReturned = !isEditMode && (returnableItems.length === 0 || returnableItems.every(i => (Number(i.qty) || 0) <= 0));
+      setIsInvoiceAlreadyReturned(isFullyReturned);
+
+      if (setFieldValue) {
+        setFieldValue('invoiceIdRef', inv.id);
+        setFieldValue('customerName', inv.customer_name);
+        setFieldValue('items', returnableItems);
+
+        const returnTotalVal = returnableItems.reduce((acc: number, item: any) => {
+          const itemQty = Number(item.qty) || 0;
+          const itemRp = Number(item.rp) || 0;
+          const itemGst = Number(item.gstRate || item.gst_rate || 18);
+          const itemFTax = Number(item.fTaxPer || item.f_tax_per || 0);
+          const base = itemRp * itemQty;
+          return acc + (base + (base / 100 * itemGst) + (base / 100 * itemFTax));
+        }, 0);
+
+        const upfrontCash = Number(inv.cash_amount_paid || 0);
+        const upfrontBank = Number(inv.bank_amount || 0) + (Array.isArray(inv.bankPayments) ? inv.bankPayments.reduce((sum: number, b: any) => sum + (Number(b.bankAmount) || 0), 0) : 0);
+        const totalPaid = upfrontCash + upfrontBank;
+        if (totalPaid > 0) {
+          setFieldValue('payoutAmountPaid', Number(Math.min(returnTotalVal, totalPaid).toFixed(2)));
+          if (upfrontBank > 0 && inv.selected_bank) {
+            setFieldValue('settlementMode', 'Bank');
+            setFieldValue('selectedBankAccountId', inv.selected_bank);
+          }
+        }
+      }
+
+      await syncInvoicePaymentMetrics(inv.id, inv);
+      return returnableItems;
+    } catch (err) {
+      console.error('Error loading returnable items:', err);
+    }
+  };
+
 
   useEffect(() => {
     const handleOutsideClick = (e: MouseEvent) => {
@@ -151,24 +284,7 @@ const AddSalesReturn = () => {
 
     setFilteredInvoices(filtered);
   }, [invoiceSearchQuery, defaultInvoices, isSelectionMade, isEditMode]);
-  const verifyInvoiceReturnStateGuard = async (invoiceId: string | number) => {
-    if (!invoiceId || isEditMode) return;
-    try {
-      const targetSearchKey = String(invoiceId).trim().toLowerCase();
-      const { data: matchedRecords } = await supabase
-        .from('sales_returns')
-        .select('original_invoice_no');
 
-      const isFound = (matchedRecords || []).some(r => {
-        const cleanRef = String(r.original_invoice_no || '').trim().toLowerCase();
-        return cleanRef === targetSearchKey || cleanRef === `inv-${targetSearchKey}` || cleanRef.includes(targetSearchKey);
-      });
-
-      setIsInvoiceAlreadyReturned(isFound);
-    } catch (err) {
-      console.error(err);
-    }
-  };
 
   const validationSchema = Yup.object().shape({
     invoiceIdRef: Yup.string().required('Required'),
@@ -200,7 +316,7 @@ const AddSalesReturn = () => {
           <h3 className="font-semibold text-black dark:text-white text-base">
             {isEditMode ? 'Modify Sales Return Note Record' : 'Compile Sales Return Note Credit Slip'}
           </h3>
-          <button onClick={() => navigate('/Sales-Return/Debit-Notes/List')} className="text-sm font-medium text-primary hover:underline">See Logs List</button>
+          <button onClick={() => navigate(`${tenantId ? `/${tenantId}` : ''}/Sales-Return/Debit-Notes/List`)} className="text-sm font-medium text-primary hover:underline">See Logs List</button>
         </div>
 
         <Formik
@@ -227,8 +343,9 @@ const AddSalesReturn = () => {
               : (Number(values.payoutAmountPaid) || 0);
 
             const finalCalculatedReturnStatus = (values.invoiceIdRef && origInvoiceCashMetrics.cashReceivedBox === 0)
-              ? 'On Credit'
-              : (payoutAmountPaid >= itemsTotalSum ? 'Paid' : 'On Credit');
+              ? 'Credit Settled'
+              : (payoutAmountPaid >= itemsTotalSum ? 'Paid' : 'Credit Settled');
+
 
             const databasePayload = {
               original_invoice_no: `INV-${values.invoiceIdRef}`,
@@ -239,8 +356,11 @@ const AddSalesReturn = () => {
               payout_amount_paid: payoutAmountPaid,
               total_amount: itemsTotalSum,
               return_status: finalCalculatedReturnStatus,
+              return_warehouse_to: origInvoiceWarehouse || 'Wearhouse A',
+              dispatch_warehouse: origInvoiceWarehouse || 'Wearhouse A',
               items: values.items
             };
+
 
             try {
               setLoading(true);
@@ -256,14 +376,32 @@ const AddSalesReturn = () => {
                 if (error) throw error;
 
                 for (const item of values.items) {
-                  const { data: activeProd } = await supabase.from('products').select('current_stock').eq('product_name', item.itemName).single();
+                  const qty = Number(item.qty) || 0;
+                  if (!qty) continue;
+
+                  const { data: activeProd } = await supabase.from('products').select('current_stock').eq('product_name', item.itemName).maybeSingle();
                   if (activeProd) {
-                    await supabase.from('products').update({ current_stock: (Number(activeProd.current_stock) || 0) + Number(item.qty) }).eq('product_name', item.itemName);
+                    await supabase.from('products').update({ current_stock: (Number(activeProd.current_stock) || 0) + qty }).eq('product_name', item.itemName);
+                  }
+
+                  const targetWh = origInvoiceWarehouse || 'Wearhouse A';
+                  const { data: whRow } = await supabase
+                    .from('warehouse_inventory')
+                    .select('id, quantity')
+                    .ilike('product_name', item.itemName)
+                    .ilike('warehouse_name', targetWh)
+                    .maybeSingle();
+
+                  if (whRow) {
+                    await supabase.from('warehouse_inventory').update({ quantity: (Number(whRow.quantity) || 0) + qty }).eq('id', whRow.id);
+                  } else {
+                    await supabase.from('warehouse_inventory').insert([{ product_name: item.itemName, warehouse_name: targetWh, quantity: qty }]);
                   }
                 }
                 toast.success('Sales Return Registered!');
               }
-              navigate('/Sales-Return/Debit-Notes/List');
+              navigate(`${tenantId ? `/${tenantId}` : ''}/Sales-Return/Debit-Notes/List`);
+
             } catch (err: any) {
               toast.error(err.message);
             } finally {
@@ -323,17 +461,10 @@ const AddSalesReturn = () => {
                           filteredInvoices.map(inv => (
                             <div
                               key={inv.id}
-                              onClick={() => {
-                                setFieldValue('invoiceIdRef', inv.id);
-                                setFieldValue('customerName', inv.customer_name);
-                                setFieldValue('items', inv.items || []);
+                              onClick={async () => {
                                 setInvoiceSearchQuery(`INV-${inv.id} (${inv.customer_name})`);
                                 setIsSelectionMade(true);
-                                verifyInvoiceReturnStateGuard(inv.id);
-                                setOrigInvoiceCashMetrics({
-                                  grandTotal: Number(inv.total_amount || 0),
-                                  cashReceivedBox: Number(inv.cash_amount_paid || 0)
-                                });
+                                await loadInvoiceAndComputeReturnableItems(inv.id, inv, setFieldValue);
                                 setIsDropdownOpen(false);
                               }}
                               className="p-2.5 hover:bg-slate-100 dark:hover:bg-meta-4 cursor-pointer text-xs font-bold text-black dark:text-white border-b border-stroke last:border-0 duration-100"
@@ -344,6 +475,8 @@ const AddSalesReturn = () => {
                         )}
                       </div>
                     )}
+
+
                     {hasAttempted && errors.invoiceIdRef && !values.invoiceIdRef && <p className="text-red-500 font-bold text-[10px] mt-0.5">⚠️ Required Field</p>}
                   </div>
 
@@ -377,7 +510,7 @@ const AddSalesReturn = () => {
                         <th className="p-2 w-12">S#</th>
                         <th className="p-2 text-left">Item Name Description</th>
                         <th className="p-2 w-28 text-right pr-2">Retail Unit Price</th>
-                        <th className="p-2 w-20 text-center">Returned Qty</th>
+                        <th className="p-2 w-24 text-center">Returned Qty</th>
                         <th className="p-2 w-28 text-right pr-2">Taxable Base Amount</th>
                         <th className="p-2 w-16 text-center">GST %</th>
                         <th className="p-2 w-24 text-right pr-2">GST Amt</th>
@@ -403,7 +536,39 @@ const AddSalesReturn = () => {
                             <td className="p-2 font-semibold font-sans">{index + 1}</td>
                             <td className="p-2 text-left font-bold font-sans text-xs">{item.itemName || 'Product Description'}</td>
                             <td className="p-2 text-right pr-2">{rp.toFixed(2)}</td>
-                            <td className="p-2 font-black text-center text-xs text-primary">{qty}</td>
+                            <td className="p-2 text-center">
+                              <input
+                                type="number"
+                                min="1"
+                                max={item.soldQty || item.maxQty || 9999}
+                                value={item.qty}
+                                onKeyDown={blockInvalidChar}
+                                onChange={(e) => {
+                                  const inputVal = Number(e.target.value) || 0;
+                                  const maxAllowed = (item.soldQty || item.maxQty || 9999);
+                                  const finalVal = Math.min(Math.max(1, inputVal), maxAllowed);
+                                  setFieldValue(`items[${index}].qty`, finalVal);
+
+                                  if (origInvoiceCashMetrics.cashReceivedBox > 0) {
+                                    const updatedItems = [...values.items];
+                                    updatedItems[index] = { ...updatedItems[index], qty: finalVal };
+                                    const newReturnVal = updatedItems.reduce((acc: number, i: any) => {
+                                      const iQty = Number(i.qty) || 0;
+                                      const iRp = Number(i.rp) || 0;
+                                      const iGst = Number(i.gstRate || i.gst_rate || 18);
+                                      const iFTax = Number(i.fTaxPer || i.f_tax_per || 0);
+                                      const base = iRp * iQty;
+                                      return acc + (base + (base / 100 * iGst) + (base / 100 * iFTax));
+                                    }, 0);
+                                    setFieldValue('payoutAmountPaid', Number(Math.min(newReturnVal, origInvoiceCashMetrics.cashReceivedBox).toFixed(2)));
+                                  }
+                                }}
+                                className="w-16 rounded border border-stroke dark:border-strokedark py-1 px-1 text-center font-black text-xs text-primary bg-white dark:bg-boxdark outline-none focus:border-primary shadow-xs"
+                              />
+                              {item.soldQty ? (
+                                <span className="block text-[9px] text-gray-400 font-sans font-normal mt-0.5">Max: {item.soldQty}</span>
+                              ) : null}
+                            </td>
                             <td className="p-2 text-right pr-2 text-gray-500">{grossBaseAmount.toFixed(2)}</td>
                             <td className="p-2 text-center text-xs text-gray-400 font-sans">{gstRate}%</td>
                             <td className="p-2 text-right pr-2 text-gray-400">{calculatedGstAmount.toFixed(2)}</td>
@@ -416,6 +581,7 @@ const AddSalesReturn = () => {
                     </tbody>
                   </table>
                 </div>
+
                 <div className="flex flex-col md:flex-row justify-between gap-10 mt-6 px-4 pb-4">
                   <div className="flex flex-col gap-4 w-full md:w-1/2 border border-stroke p-4 rounded dark:border-strokedark bg-slate-50/10 space-y-1">
                     <div>
@@ -454,16 +620,16 @@ const AddSalesReturn = () => {
 
                     <div className="border-t border-stroke dark:border-strokedark my-2"></div>
                     <div>
-                      <h4 className="text-xs font-bold uppercase tracking-wider text-danger mb-2">2. Cash Payout Remitted Amount Paid (PKR): *</h4>
+                      <h4 className="text-xs font-bold uppercase tracking-wider text-danger mb-2">2. Refund Payout Remitted Amount (PKR): *</h4>
                       
                       {values.invoiceIdRef && origInvoiceCashMetrics.cashReceivedBox === 0 ? (
                         <div className="p-3 bg-amber-50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-800/40 rounded text-[11px] text-amber-800 dark:text-amber-300 font-semibold space-y-1">
                           <div className="flex items-center justify-between">
-                            <span className="font-bold uppercase tracking-wide text-danger text-xs">Cash Payout: Rs. 0.00</span>
+                            <span className="font-bold uppercase tracking-wide text-danger text-xs">Payout: Rs. 0.00</span>
                             <span className="text-[9px] bg-amber-200 dark:bg-amber-900/50 text-amber-900 dark:text-amber-200 px-1.5 py-0.5 rounded font-black tracking-wider">CREDIT ADJUSTMENT ONLY</span>
                           </div>
                           <p className="text-[10px] leading-relaxed text-gray-600 dark:text-gray-400 font-normal">
-                            ℹ️ This invoice was billed <b>ON CREDIT</b> with <b>Rs. 0.00 cash received</b>. Cash payout is locked to <b>Rs. 0.00</b>. The return item value will automatically credit & adjust the customer's account ledger balance.
+                            ℹ️ This invoice was billed <b>ON CREDIT</b> with <b>Rs. 0.00 cash/bank payment received</b>. Cash payout is locked to <b>Rs. 0.00</b>. The return item value will automatically credit & adjust the customer's account ledger balance.
                           </p>
                         </div>
                       ) : (
@@ -493,9 +659,10 @@ const AddSalesReturn = () => {
                       <div className="bg-blue-50/50 dark:bg-meta-4/20 border border-blue-200 rounded p-3 space-y-1.5 font-mono text-[11px] text-gray-500 dark:text-gray-300">
                         <h5 className="font-bold text-primary dark:text-white text-[10px] uppercase tracking-wide">📄 Source Invoice Audit Profile</h5>
                         <div className="flex justify-between"><span>Original Grand Total:</span><b className="text-black dark:text-white">Rs. {origInvoiceCashMetrics.grandTotal.toLocaleString()}</b></div>
-                        <div className="flex justify-between border-t pt-1 border-blue-100 dark:border-strokedark"><span>Counter Cash Paid:</span><b className="text-success font-black text-xs">Rs. {origInvoiceCashMetrics.cashReceivedBox.toLocaleString()}</b></div>
+                        <div className="flex justify-between border-t pt-1 border-blue-100 dark:border-strokedark"><span>Total Received (Cash/Bank):</span><b className="text-success font-black text-xs">Rs. {origInvoiceCashMetrics.cashReceivedBox.toLocaleString()}</b></div>
                       </div>
                     )}
+
 
                     <div className="flex justify-between border-b pb-1 dark:border-strokedark pt-1">
                       <span>Net Return Items Value:</span>
@@ -514,16 +681,28 @@ const AddSalesReturn = () => {
                     <div className="flex justify-between pt-1 font-mono text-[10px] text-gray-400">
                       <span>Calculated Return Strategy:</span>
                       <b className="uppercase underline text-black dark:text-white">
-                        {Number(values.payoutAmountPaid) >= values.items.reduce((acc: number, i: any) => {
-                          const itemQty = Number(i.qty) || 0;
-                          const itemRp = Number(i.rp) || 0;
-                          const itemGst = Number(i.gstRate || i.gst_rate || 18);
-                          const itemFTax = Number(i.fTaxPer || i.f_tax_per || 0);
-                          const base = itemRp * itemQty;
-                          return acc + (base + (base / 100 * itemGst) + (base / 100 * itemFTax));
-                        }, 0) ? 'Paid Return Note' : 'Linked On Credit'}
+                        {(() => {
+                          const payout = Number(values.payoutAmountPaid) || 0;
+                          const returnTotalSum = values.items.reduce((acc: number, i: any) => {
+                            const itemQty = Number(i.qty) || 0;
+                            const itemRp = Number(i.rp) || 0;
+                            const itemGst = Number(i.gstRate || i.gst_rate || 18);
+                            const itemFTax = Number(i.fTaxPer || i.f_tax_per || 0);
+                            const base = itemRp * itemQty;
+                            return acc + (base + (base / 100 * itemGst) + (base / 100 * itemFTax));
+                          }, 0);
+
+                          if (payout >= returnTotalSum - 0.01 && payout > 0) {
+                            return values.settlementMode === 'Bank' ? 'Bank Refund (Paid in Full)' : 'Cash Refund (Paid in Full)';
+                          }
+                          if (payout > 0) {
+                            return `Partial Refund (Rs. ${payout.toFixed(2)} Paid, Balance on Credit)`;
+                          }
+                          return 'Credit Settled (0 Cash Owed)';
+                        })()}
                       </b>
                     </div>
+
                   </div>
                 </div>
 
@@ -531,12 +710,14 @@ const AddSalesReturn = () => {
                   <div>
                     {isInvoiceAlreadyReturned && !isEditMode && (
                       <p className="text-red-500 font-black text-xs tracking-wide bg-red-50 border border-red-200 py-1.5 px-4 rounded shadow-xs animate-pulse">
-                        ⚠️ This Invoice is Already Returned
+                        ⚠️ This Invoice has already been fully returned (No returnable quantity remaining)
                       </p>
                     )}
+
                   </div>
                   <div className="flex gap-4">
-                    <button type="button" onClick={() => navigate('/Sales-Return/Debit-Notes/List')} className="rounded border border-stroke dark:border-strokedark py-2 px-8 font-semibold text-sm text-black dark:text-white hover:bg-gray-100 transition cursor-pointer">Cancel</button>
+                    <button type="button" onClick={() => navigate(`${tenantId ? `/${tenantId}` : ''}/Sales-Return/Debit-Notes/List`)} className="rounded border border-stroke dark:border-strokedark py-2 px-8 font-semibold text-sm text-black dark:text-white hover:bg-gray-100 transition cursor-pointer">Cancel</button>
+
                     <button
                       type="submit"
                       disabled={loading || (isInvoiceAlreadyReturned && !isEditMode)}

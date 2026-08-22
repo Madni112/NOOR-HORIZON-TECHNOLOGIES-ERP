@@ -4,7 +4,10 @@ import { toast } from 'react-hot-toast';
 import Spinner from '../../ui/Spinner';
 import { MdDelete, MdAdd, MdEdit, MdClose } from 'react-icons/md';
 
+import { useAuth } from '../../Context/Auth';
+
 const Categories = () => {
+    const { tenantId } = useAuth();
     const [categories, setCategories] = useState<any[]>([]);
     const [loading, setLoading] = useState(true);
 
@@ -22,15 +25,21 @@ const Categories = () => {
 
     useEffect(() => {
         fetchCategories();
-    }, []);
+    }, [tenantId]);
 
     const fetchCategories = async () => {
         try {
             setLoading(true);
-            const { data, error } = await supabase
+            let query = supabase
                 .from('inventory_categories')
                 .select('*')
                 .order('name', { ascending: true });
+
+            if (tenantId) {
+                query = query.eq('tenant_id', tenantId);
+            }
+
+            const { data, error } = await query;
 
             if (error) throw error;
             setCategories(data || []);
@@ -75,10 +84,15 @@ const Categories = () => {
                 toast.success('Category title modified successfully!');
                 setEditingId(null);
             } else {
-                // Path B: Standard insertion saves a fresh entry row
+                // Path B: Standard insertion saves a fresh entry row with tenant_id
+                const insertPayload: any = { name: cleanName };
+                if (tenantId) {
+                    insertPayload.tenant_id = tenantId;
+                }
+
                 const { error } = await supabase
                     .from('inventory_categories')
-                    .insert([{ name: cleanName }]);
+                    .insert([insertPayload]);
 
                 if (error) throw error;
                 toast.success('Category registered successfully!');
@@ -92,6 +106,7 @@ const Categories = () => {
             setSubmitting(false);
         }
     };
+
 
     // TRIGGERED WHEN USER CLICKS COMPONENT INLINE MDEDIT TARGET CELL BUTTON
     const handleTriggerEdit = (cat: any) => {

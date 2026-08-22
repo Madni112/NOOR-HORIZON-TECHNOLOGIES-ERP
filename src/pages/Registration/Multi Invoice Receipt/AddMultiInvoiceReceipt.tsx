@@ -6,10 +6,13 @@ import { toast } from 'react-hot-toast';
 import { supabase } from '../../../Context/supabaseClient';
 import Spinner from '../../../ui/Spinner';
 import { MdReceipt, MdArrowBack } from 'react-icons/md';
+import { useAuth } from '../../../Context/Auth';
 
 const AddMultiInvoiceReceipt = () => {
+    const { tenantId } = useAuth();
     const navigate = useNavigate();
     const location = useLocation();
+
 
     const editData = location.state?.receiptRecord;
     const isEditMode = !!editData;
@@ -19,6 +22,7 @@ const AddMultiInvoiceReceipt = () => {
     const [fetchingInvoices, setFetchingInvoices] = useState(false);
     const [customers, setCustomers] = useState<any[]>([]);
     const [banks, setBanks] = useState<any[]>([]);
+    const [coaAccounts, setCoaAccounts] = useState<any[]>([]);
 
     const [formInitValues, setFormInitValues] = useState({
         receiptNo: `MRV-${Date.now().toString().slice(-6)}`,
@@ -37,8 +41,10 @@ const AddMultiInvoiceReceipt = () => {
                 setInitialLoading(true);
                 const { data: custData } = await supabase.from('customers').select('id, customerName');
                 const { data: bankData } = await supabase.from('banks').select('id, bankName, accountTitle');
+                const { data: coaData } = await supabase.from('chart_of_accounts').select('account_code, account_title, control_code, category_code');
                 if (custData) setCustomers(custData);
                 if (bankData) setBanks(bankData);
+                if (coaData) setCoaAccounts(coaData);
             } catch (err: any) {
                 toast.error('Failed to load metadata lookup layers: ' + err.message);
             } finally {
@@ -161,10 +167,11 @@ const AddMultiInvoiceReceipt = () => {
                     <h3 className="font-medium text-black dark:text-white flex items-center gap-2 text-base">
                         <MdReceipt className="text-primary text-xl" /> Create Multi-Invoice Settlement Voucher
                     </h3>
-                    <button onClick={() => navigate('/Registration/InvoiceReceipt/List')} className="flex items-center gap-1.5 text-sm font-medium text-primary hover:underline">
+                    <button type="button" onClick={() => navigate(`${tenantId ? `/${tenantId}` : ''}/Registration/InvoiceReceipt/List`)} className="flex items-center gap-1.5 text-sm font-medium text-primary hover:underline cursor-pointer">
                         <MdArrowBack /> Back to Logs
                     </button>
                 </div>
+
 
                 <Formik
                     initialValues={formInitValues}
@@ -180,14 +187,40 @@ const AddMultiInvoiceReceipt = () => {
 
                         try {
                             setLoading(true);
-                            const assetAccountCode = values.paymentMethod === 'Cash' ? '1002001' : '1002002';
+                            // Dynamically resolve COA account codes from live Supabase records
+                            const cashCoa = coaAccounts.find((c: any) =>
+                                String(c.control_code || '').toLowerCase().includes('cash') ||
+                                String(c.account_title || '').toLowerCase().includes('cash')
+                            );
+
+                            const selectedBankObj = banks.find((b: any) => String(b.id) === String(values.selectedBankId));
+                            const bankCoa = coaAccounts.find((c: any) =>
+                                (selectedBankObj && (
+                                    String(c.account_title || '').toLowerCase().includes(String(selectedBankObj.bankName || '').toLowerCase()) ||
+                                    String(c.account_title || '').toLowerCase().includes(String(selectedBankObj.accountTitle || '').toLowerCase())
+                                )) ||
+                                String(c.control_code || '').toLowerCase().includes('bank')
+                            );
+
+                            const recCoa = coaAccounts.find((c: any) =>
+                                String(c.control_code || '').toLowerCase().includes('debtor') ||
+                                String(c.control_code || '').toLowerCase().includes('receivable') ||
+                                String(c.account_title || '').toLowerCase().includes('receivable')
+                            );
+
+                            const assetAccountCode = values.paymentMethod === 'Cash'
+                                ? (cashCoa ? String(cashCoa.account_code) : '1010')
+                                : (bankCoa ? String(bankCoa.account_code) : '6789');
+
+                            const customerAccountCode = recCoa ? String(recCoa.account_code) : (cashCoa ? String(cashCoa.account_code) : '1010');
+
                             const activeRowsToClear = values.allocations.filter((a: any) => Number(a.amountToAllocate) > 0);
 
                             for (const row of activeRowsToClear) {
                                 const rowAmount = Number(row.amountToAllocate);
                                 const balancedJournalItems = [
                                     { accountCode: assetAccountCode, description: `Multi-Invoice Allocation Vch-${values.receiptNo} split against INV-${row.invoiceId}`, debit: rowAmount, credit: 0 },
-                                    { accountCode: '1001001', description: `Multi-Invoice Allocation Vch-${values.receiptNo} split debt clear against INV-${row.invoiceId}`, debit: 0, credit: rowAmount }
+                                    { accountCode: customerAccountCode, description: `Multi-Invoice Allocation Vch-${values.receiptNo} split debt clear against INV-${row.invoiceId}`, debit: 0, credit: rowAmount }
                                 ];
 
                                 const compositeNarration = `Customer: ${values.customerName} | Bulk Voucher: ${values.receiptNo} | Settling target segment of INV-${row.invoiceId} | Note: ${values.notes.trim()}`.trim();
@@ -228,7 +261,8 @@ const AddMultiInvoiceReceipt = () => {
                             }
 
                             toast.success(`Bulk receipts processed successfully! ${activeRowsToClear.length} invoices updated.`);
-                            navigate('/sales/invoice/list');
+                            navigate(`${tenantId ? `/${tenantId}` : ''}/Registration/InvoiceReceipt/List`);
+
                         } catch (err: any) {
                             toast.error('Bulk submission failure event: ' + err.message);
                         } finally {
@@ -384,8 +418,9 @@ const AddMultiInvoiceReceipt = () => {
                             </div>
 
                             <div className="flex justify-end gap-4 pt-4 border-t border-stroke dark:border-strokedark">
-                                <button type="button" onClick={() => navigate('/Registration/InvoiceReceipt/List')} className="rounded bg-danger py-2.5 px-8 font-medium text-white hover:bg-opacity-90 transition text-xs shadow-sm h-10 min-w-36 cursor-pointer" >Cancel</button>
+                                <button type="button" onClick={() => navigate(`${tenantId ? `/${tenantId}` : ''}/Registration/InvoiceReceipt/List`)} className="rounded bg-danger py-2.5 px-8 font-medium text-white hover:bg-opacity-90 transition text-xs shadow-sm h-10 min-w-36 cursor-pointer" >Cancel</button>
                                 
+
                                 <button type="submit" disabled={loading || values.allocations.length === 0} className="bg-primary text-white py-2 px-10 rounded font-semibold text-sm hover:bg-opacity-90 transition shadow-sm disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer" >
                                     {loading ? <Spinner /> : 'Save Bulk Receipt'}
                                 </button>

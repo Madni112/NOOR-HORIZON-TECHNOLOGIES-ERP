@@ -4,10 +4,15 @@ import { supabase } from '../../../Context/supabaseClient';
 import { toast } from 'react-hot-toast';
 import Spinner from '../../../ui/Spinner';
 import { MdDelete, MdEdit } from 'react-icons/md';
+import { useAuth } from '../../../Context/Auth';
+import { recalculateInvoiceSettlementStatus } from '../../../service/financialCalculations';
 
 function InvoiceReceiptList() {
+
+  const { tenantId } = useAuth();
   const navigate = useNavigate();
   const [receipts, setReceipts] = useState<any[]>([]);
+
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [pageSize, setPageSize] = useState(10);
@@ -40,12 +45,25 @@ function InvoiceReceiptList() {
 
     try {
       setLoading(true);
+      // 1. Fetch voucher details before deleting to resolve linked invoice
+      const { data: voucherToDelete } = await supabase
+        .from('financial_vouchers')
+        .select('original_invoice_no')
+        .eq('id', id)
+        .maybeSingle();
+
       const { error } = await supabase
         .from('financial_vouchers')
         .delete()
         .eq('id', id);
 
       if (error) throw error;
+
+      // 2. Synchronously recalculate parent sales invoice receipt_status
+      if (voucherToDelete?.original_invoice_no) {
+        await recalculateInvoiceSettlementStatus(voucherToDelete.original_invoice_no);
+      }
+
       toast.success('Invoice receipt record wiped cleanly.');
       fetchInvoiceReceiptHistories();
     } catch (err: any) {
@@ -54,6 +72,7 @@ function InvoiceReceiptList() {
       setLoading(false);
     }
   };
+
 
   const filteredReceipts = receipts.filter((r) =>
     r.voucher_no?.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -80,19 +99,20 @@ function InvoiceReceiptList() {
         <div className="flex items-center gap-3">
           <button
             type="button"
-            onClick={() => navigate('/Registration/MultiInvoiceReceipt/Add')}
+            onClick={() => navigate(`${tenantId ? `/${tenantId}` : ''}/Registration/MultiInvoiceReceipt/Add`)}
             className="flex items-center justify-center rounded bg-success py-2 px-4 text-sm font-medium text-white hover:bg-opacity-90 transition duration-150 shadow-sm cursor-pointer"
           >
             + Process Bulk Multi-Invoice
           </button>
           <button
             type="button"
-            onClick={() => navigate('/Registration/InvoiceReceipt/Add')}
+            onClick={() => navigate(`${tenantId ? `/${tenantId}` : ''}/Registration/InvoiceReceipt/Add`)}
             className="flex items-center justify-center rounded bg-primary py-2 px-4 text-sm font-medium text-white hover:bg-opacity-90 transition duration-150 shadow-sm cursor-pointer"
           >
             + Clear Single Invoice
           </button>
         </div>
+
       </div>
       <div className="rounded-sm border border-stroke bg-white shadow-default dark:border-strokedark dark:bg-boxdark p-6">
         <div className="flex flex-col sm:flex-row justify-between items-center gap-4 mb-4">
@@ -149,13 +169,14 @@ function InvoiceReceiptList() {
                       <td className="py-3.5 px-4 text-center text-gray-500 font-medium whitespace-nowrap">{r.voucher_date}</td>
                       <td className="py-3.5 px-4 text-center">
                         <div className="flex items-center justify-center space-x-3">
-                          <button type="button" onClick={() => navigate('/Registration/InvoiceReceipt/Add', { state: { receipt: r } })} className="text-gray-500 hover:text-primary transition p-0.5 cursor-pointer" title="Modify Receipt Details" >
+                          <button type="button" onClick={() => navigate(`${tenantId ? `/${tenantId}` : ''}/Registration/InvoiceReceipt/Add`, { state: { receipt: r } })} className="text-gray-500 hover:text-primary transition p-0.5 cursor-pointer" title="Modify Receipt Details" >
                             <MdEdit size={16} />
                           </button>
                           <button type="button" onClick={() => handleDeleteReceipt(r.id)} className="text-gray-500 hover:text-danger transition p-0.5 cursor-pointer" title="Delete Receipt Record" >
                             <MdDelete size={16} />
                           </button>
                         </div>
+
                       </td>
                     </tr>
                   );

@@ -14,6 +14,7 @@ function AddPurchaseReceipt() {
 
   const [vendorOptions, setVendorOptions] = useState<any[]>([]);
   const [bankAccounts, setBankAccounts] = useState<any[]>([]);
+  const [coaAccounts, setCoaAccounts] = useState<any[]>([]);
   const [localVendor, setLocalVendor] = useState('');
   const [totalOutstandingLiability, setTotalOutstandingLiability] = useState<number>(0);
 
@@ -26,9 +27,11 @@ function AddPurchaseReceipt() {
         setMetadataLoading(true);
         const { data: vData } = await supabase.from('vendors').select('id, vendor_name').order('vendor_name', { ascending: true });
         const { data: bankData } = await supabase.from('banks').select('id, bankName, accountTitle, accountNumber');
+        const { data: coaData } = await supabase.from('chart_of_accounts').select('account_code, account_title, control_code, category_code');
 
         if (vData) setVendorOptions(vData);
         if (bankData) setBankAccounts(bankData);
+        if (coaData) setCoaAccounts(coaData);
 
         if (isEditMode && editData) {
           const name = editData.customer_name || '';
@@ -142,10 +145,38 @@ function AddPurchaseReceipt() {
 
               try {
                 setLoading(true);
-                const assetAccountCode = values.voucherType === 'By Cash' ? '1002001' : '1002002';
-                
+                // Dynamically resolve COA account codes from live Supabase records
+                const cashCoa = coaAccounts.find((c: any) =>
+                  String(c.control_code || '').toLowerCase().includes('cash') ||
+                  String(c.account_title || '').toLowerCase().includes('cash')
+                );
+
+                const selectedBankObj = bankAccounts.find((b: any) => String(b.id) === String(values.selectedBankId));
+                const bankCoa = coaAccounts.find((c: any) =>
+                  (selectedBankObj && (
+                    String(c.linked_bank_id) === String(selectedBankObj.id) ||
+                    String(c.account_code) === String(selectedBankObj.accountNumber) ||
+                    String(c.account_title || '').toLowerCase().includes(String(selectedBankObj.bankName || '').toLowerCase())
+                  )) ||
+                  String(c.control_code || '').toLowerCase().includes('bank')
+                );
+
+                const payCoa = coaAccounts.find((c: any) =>
+                  String(c.control_code || '').toLowerCase().includes('creditor') ||
+                  String(c.control_code || '').toLowerCase().includes('payable') ||
+                  String(c.account_title || '').toLowerCase().includes('payable') ||
+                  String(c.account_title || '').toLowerCase().includes('creditor')
+                );
+
+                const assetAccountCode = values.voucherType === 'By Cash'
+                  ? (cashCoa ? String(cashCoa.account_code) : '1010')
+                  : (bankCoa ? String(bankCoa.account_code) : (selectedBankObj?.accountNumber || '1015'));
+
+
+                const vendorAccountCode = payCoa ? String(payCoa.account_code) : (cashCoa ? String(cashCoa.account_code) : '1010');
+
                 const balancedJournalItems = [
-                  { accountCode: '2001001', description: `Settled balance due to ${localVendor}`, debit: enteredAmount, credit: 0 },
+                  { accountCode: vendorAccountCode, description: `Settled balance due to ${localVendor}`, debit: enteredAmount, credit: 0 },
                   { accountCode: assetAccountCode, description: `Fund drawn via ${values.voucherNo}`, debit: 0, credit: enteredAmount }
                 ];
 

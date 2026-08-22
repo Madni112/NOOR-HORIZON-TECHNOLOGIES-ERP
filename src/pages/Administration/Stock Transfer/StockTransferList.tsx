@@ -4,8 +4,10 @@ import { supabase } from '../../../Context/supabaseClient';
 import { toast } from 'react-hot-toast';
 import Spinner from '../../../ui/Spinner';
 import { MdEdit, MdDelete, MdCompareArrows } from 'react-icons/md';
+import { useAuth } from '../../../Context/Auth';
 
 const StockTransferList = () => {
+  const { tenantId } = useAuth();
   const navigate = useNavigate();
   const [transfers, setTransfers] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -36,7 +38,7 @@ const StockTransferList = () => {
   };
 
   const handleDeleteTransferRecord = async (id: string | number) => {
-    if (!window.confirm('Are you certain you want to permanently delete this stock transfer record? Allocated location stock balances will reverse!')) return;
+    if (!window.confirm('Are you certain you want to permanently delete this stock transfer record?')) return;
 
     try {
       const { data: targetRecord, error: fetchError } = await supabase
@@ -47,10 +49,12 @@ const StockTransferList = () => {
 
       if (fetchError) throw fetchError;
 
-      if (targetRecord && targetRecord.items) {
+      // Only revert physical warehouse stocks if the transfer slip was CONFIRMED (Drafts never moved stock)
+      if (targetRecord && targetRecord.status === 'Confirm' && targetRecord.items) {
         const itemsArr = Array.isArray(targetRecord.items) ? targetRecord.items : JSON.parse(targetRecord.items || '[]');
         const fromLoc = targetRecord.from_location;
         const toLoc = targetRecord.to_location;
+
 
         for (const item of itemsArr) {
           const qty = Number(item.qty || item.quantity || 0);

@@ -3,10 +3,13 @@ import { useNavigate } from 'react-router-dom';
 import { supabase } from '../../../Context/supabaseClient';
 import { toast } from 'react-hot-toast';
 import Spinner from '../../../ui/Spinner';
+import { useAuth } from '../../../Context/Auth';
 
 const PurchaseReport = () => {
   const navigate = useNavigate();
+  const { tenantId } = useAuth();
   const [loading, setLoading] = useState(true);
+
   const [activeTab, setActiveTab] = useState<'purchase' | 'return' | 'invoice'>('purchase');
 
   const [vendors, setVendors] = useState<any[]>([]);
@@ -53,7 +56,9 @@ const PurchaseReport = () => {
         const { data: uomData } = await supabase
           .from('inventory_uom')
           .select('id, short_code, full_name')
+          .eq('tenant_id', tenantId || 'bashir')
           .eq('is_active', true);
+
 
         if (vend) setVendors(vend);
         if (cat) setCategories(cat);
@@ -120,8 +125,9 @@ const PurchaseReport = () => {
       toast.error('Please isolate or choose a target document profile reference ID');
       return;
     }
-    navigate('/Reports/Purchase-Report/Print', { state: { type: activeTab, filters: criteria } });
+    navigate(`${tenantId ? `/${tenantId}` : ''}/Reports/Purchase-Report/Print`, { state: { type: activeTab, filters: criteria } });
   };
+
 
   if (loading) return <div className="flex h-48 items-center justify-center"><Spinner /></div>;
   return (

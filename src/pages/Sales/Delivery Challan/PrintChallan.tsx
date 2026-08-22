@@ -3,6 +3,8 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { supabase } from '../../../Context/supabaseClient';
 import { toast } from 'react-hot-toast';
 import Spinner from '../../../ui/Spinner';
+import { useAuth } from '../../../Context/Auth';
+
 
 
 interface ChallanItem {
@@ -28,7 +30,9 @@ interface ChallanData {
 const PrintChallan = () => {
   const { id } = useParams();
   const navigate = useNavigate();
+  const { businessName, tenantId } = useAuth();
   const [challan, setChallan] = useState<ChallanData | null>(null);
+
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -128,7 +132,7 @@ const PrintChallan = () => {
 
       <div className="no-print flex justify-between items-center mb-6 bg-slate-50 p-4 rounded border border-stroke">
         <button
-          onClick={() => navigate('/Delivery-Challan/List')}
+          onClick={() => navigate(`${tenantId ? `/${tenantId}` : ''}/Delivery-Challan/List`)}
           className="flex items-center gap-2 text-sm font-medium text-gray-600 hover:text-black transition"
         >
           ← Return to History
@@ -168,12 +172,11 @@ const PrintChallan = () => {
             <div>
               <h4 className="font-bold text-gray-500 mb-2 uppercase tracking-wide text-[11px]">Supplier Details:</h4>
               <div className="space-y-1 text-black font-medium">
-                <p className="text-sm font-extrabold text-primary">Softhub-Pk ERP Distribution</p>
-                <p>Plot 12, Industrial Area Phase II,</p>
-                <p>Hyderabad, Sindh, Pakistan</p>
-                <p>Phone: +92-22-1112223</p>
+                <p className="text-sm font-extrabold text-primary">{businessName ? businessName.toUpperCase() : 'NOOR HORIZON TECHNOLOGIES ERP'}</p>
+                <p>Enterprise Logistics & Delivery Dispatch</p>
               </div>
             </div>
+
             <div>
               <h4 className="font-bold text-gray-500 mb-2 uppercase tracking-wide text-[11px]">Consignee / Consigned To:</h4>
               <div className="space-y-1 text-black font-medium">

@@ -5,8 +5,10 @@ import * as Yup from 'yup';
 import { supabase } from '../../../Context/supabaseClient';
 import { toast } from 'react-hot-toast';
 import Spinner from '../../../ui/Spinner';
+import { useAuth } from '../../../Context/Auth';
 
 const AddStockTransfer = () => {
+  const { tenantId } = useAuth();
   const [loading, setLoading] = useState(false);
   const [metadataLoading, setMetadataLoading] = useState(true);
   const [locations, setLocations] = useState<any[]>([]);
@@ -91,10 +93,11 @@ const AddStockTransfer = () => {
           <h3 className="font-semibold text-black dark:text-white text-base">
             {isEditMode ? `View Transfer Slip: ${editData.transfer_no}` : 'Initialize Multi-Warehouse Stock Transfer'}
           </h3>
-          <button type="button" onClick={() => navigate('/Administration/StockTransfer/List')} className="text-sm font-medium text-primary hover:underline">
+          <button type="button" onClick={() => navigate(`${tenantId ? `/${tenantId}` : ''}/Administration/StockTransfer/List`)} className="text-sm font-medium text-primary hover:underline">
             Back to History
           </button>
         </div>
+
 
         <Formik
           initialValues={isEditMode ? {
@@ -130,68 +133,66 @@ const AddStockTransfer = () => {
             try {
               setLoading(true);
 
-              if (values.status === 'Confirm') {
-                for (const item of values.items) {
-                  const { data: sourceStock } = await supabase
-                    .from('warehouse_inventory')
-                    .select('quantity')
-                    .eq('product_name', item.itemName)
-                    .eq('warehouse_name', values.fromLocation)
-                    .maybeSingle();
+              for (const item of values.items) {
+                const { data: sourceStock } = await supabase
+                  .from('warehouse_inventory')
+                  .select('quantity')
+                  .eq('product_name', item.itemName)
+                  .eq('warehouse_name', values.fromLocation)
+                  .maybeSingle();
 
-                  let availablePoolFunds = 0;
-                  if (sourceStock) {
-                    availablePoolFunds = Number(sourceStock.quantity);
-                  } else {
-                    const localMatch = productList.find(p => p.product_name === item.itemName);
-                    availablePoolFunds = localMatch ? Number(localMatch.current_stock) : 0;
-                  }
-
-                  if (availablePoolFunds < Number(item.qty)) {
-                    toast.error(`Insufficient Balance: "${item.itemName}" only has ${availablePoolFunds} items left in "${values.fromLocation}" warehouse partition.`);
-                    setLoading(false);
-                    return;
-                  }
+                let availablePoolFunds = 0;
+                if (sourceStock) {
+                  availablePoolFunds = Number(sourceStock.quantity);
+                } else {
+                  const localMatch = productList.find(p => p.product_name === item.itemName);
+                  availablePoolFunds = localMatch ? Number(localMatch.current_stock) : 0;
                 }
 
-                for (const item of values.items) {
-                  const { data: sourceStock } = await supabase
+                if (availablePoolFunds < Number(item.qty)) {
+                  toast.error(`Insufficient Balance: "${item.itemName}" only has ${availablePoolFunds} items left in "${values.fromLocation}" warehouse partition.`);
+                  setLoading(false);
+                  return;
+                }
+              }
+
+              for (const item of values.items) {
+                const { data: sourceStock } = await supabase
+                  .from('warehouse_inventory')
+                  .select('id, quantity')
+                  .ilike('product_name', item.itemName)
+                  .ilike('warehouse_name', values.fromLocation)
+                  .maybeSingle();
+
+                if (sourceStock) {
+                  await supabase
                     .from('warehouse_inventory')
-                    .select('id, quantity')
-                    .ilike('product_name', item.itemName)
-                    .ilike('warehouse_name', values.fromLocation)
-                    .maybeSingle();
-
-                  if (sourceStock) {
-                    await supabase
-                      .from('warehouse_inventory')
-                      .update({ quantity: Number(sourceStock.quantity) - Number(item.qty) })
-                      .eq('id', sourceStock.id);
-                  } else {
-                    const localMatch = productList.find(p => p.product_name === item.itemName);
-                    const baseGlobalStock = localMatch ? Number(localMatch.current_stock) : 0;
-                    await supabase
-                      .from('warehouse_inventory')
-                      .insert([{ product_name: item.itemName, warehouse_name: values.fromLocation, quantity: Math.max(0, baseGlobalStock - Number(item.qty)) }]);
-                  }
-
-                  const { data: destStock } = await supabase
+                    .update({ quantity: Number(sourceStock.quantity) - Number(item.qty) })
+                    .eq('id', sourceStock.id);
+                } else {
+                  const localMatch = productList.find(p => p.product_name === item.itemName);
+                  const baseGlobalStock = localMatch ? Number(localMatch.current_stock) : 0;
+                  await supabase
                     .from('warehouse_inventory')
-                    .select('id, quantity')
-                    .ilike('product_name', item.itemName)
-                    .ilike('warehouse_name', values.toLocation)
-                    .maybeSingle();
+                    .insert([{ product_name: item.itemName, warehouse_name: values.fromLocation, quantity: Math.max(0, baseGlobalStock - Number(item.qty)) }]);
+                }
 
-                  if (destStock) {
-                    await supabase
-                      .from('warehouse_inventory')
-                      .update({ quantity: Number(destStock.quantity) + Number(item.qty) })
-                      .eq('id', destStock.id);
-                  } else {
-                    await supabase
-                      .from('warehouse_inventory')
-                      .insert([{ product_name: item.itemName, warehouse_name: values.toLocation, quantity: Number(item.qty) }]);
-                  }
+                const { data: destStock } = await supabase
+                  .from('warehouse_inventory')
+                  .select('id, quantity')
+                  .ilike('product_name', item.itemName)
+                  .ilike('warehouse_name', values.toLocation)
+                  .maybeSingle();
+
+                if (destStock) {
+                  await supabase
+                    .from('warehouse_inventory')
+                    .update({ quantity: Number(destStock.quantity) + Number(item.qty) })
+                    .eq('id', destStock.id);
+                } else {
+                  await supabase
+                    .from('warehouse_inventory')
+                    .insert([{ product_name: item.itemName, warehouse_name: values.toLocation, quantity: Number(item.qty) }]);
                 }
               }
 
@@ -200,10 +201,11 @@ const AddStockTransfer = () => {
                 from_location: values.fromLocation,
                 to_location: values.toLocation,
                 transfer_date: values.transferDate,
-                status: values.status,
-                remarks: values.remarks.trim(),
+                status: 'Confirm',
+                remarks: (values.remarks || '').trim(),
                 items: values.items
               };
+
 
               const { error } = isEditMode
                 ? await supabase.from('stock_transfers').update(databasePayload).eq('id', editData.id)
@@ -211,8 +213,9 @@ const AddStockTransfer = () => {
 
               if (error) throw error;
               toast.success('Internal stock distribution movement transaction saved successfully!');
-              navigate('/Administration/StockTransfer/List');
+              navigate(`${tenantId ? `/${tenantId}` : ''}/Administration/StockTransfer/List`);
             } catch (err: any) {
+
               toast.error('Transaction Failed: ' + err.message);
             } finally {
               setLoading(false);
@@ -351,27 +354,20 @@ const AddStockTransfer = () => {
                 </table>
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-4 gap-4 items-center">
-                <div className="md:col-span-3">
-                  <label className="block text-gray-500 dark:text-gray-400 mb-1 font-medium">Transaction Remarks / Internal Tracking Notes:</label>
-                  <input type="text" name="remarks" disabled={isEditMode} onChange={handleChange} value={values.remarks} className="w-full border border-stroke dark:border-strokedark rounded p-2.5 bg-transparent outline-none focus:border-primary text-black dark:text-white" placeholder="Enter reason description details..." />
-                </div>
-                <div>
-                  <label className="block text-gray-500 dark:text-gray-400 mb-1 font-medium">Slip State:</label>
-                  <select name="status" disabled={isEditMode} onChange={handleChange} value={values.status} className="w-full border border-stroke dark:border-strokedark rounded p-2.5 bg-transparent font-bold text-primary dark:bg-boxdark">
-                    <option value="Confirm">Confirm (Deduct & Transfer Instantly)</option>
-                    <option value="Draft">Draft (Save Layout Only)</option>
-                  </select>
-                </div>
+              <div>
+                <label className="block text-gray-500 dark:text-gray-400 mb-1 font-medium">Transaction Remarks / Internal Tracking Notes:</label>
+                <input type="text" name="remarks" disabled={isEditMode} onChange={handleChange} value={values.remarks} className="w-full border border-stroke dark:border-strokedark rounded p-2.5 bg-transparent outline-none focus:border-primary text-black dark:text-white" placeholder="Enter reason description details..." />
               </div>
+
 
               {/* ✅ MODIFIED RIGHT-ALIGNED BUTTON ROW CONTAINER */}
               <div className="pt-4 mt-4 border-t border-stroke dark:border-strokedark flex justify-end gap-3">
                 <button
                   type="button"
-                  onClick={() => navigate('/Administration/StockTransfer/List')}
+                  onClick={() => navigate(`${tenantId ? `/${tenantId}` : ''}/Administration/StockTransfer/List`)}
                   className="bg-danger text-white py-2 px-8 rounded font-medium hover:bg-opacity-90 transition shadow-sm cursor-pointer"
                 >
+
                   {isEditMode ? 'Close View' : 'Cancel'}
                 </button>
                 {!isEditMode && (

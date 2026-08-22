@@ -5,6 +5,7 @@ import * as Yup from 'yup';
 import { supabase } from '../../../Context/supabaseClient';
 import { toast } from 'react-hot-toast';
 import Spinner from '../../../ui/Spinner';
+import { useAuth } from '../../../Context/Auth';
 
 interface UomItem {
   id: number;
@@ -15,12 +16,14 @@ interface UomItem {
 }
 
 const AddProduct = () => {
+  const { tenantId } = useAuth();
   const [loading, setLoading] = useState(false);
   const [metadataLoading, setMetadataLoading] = useState(true);
   
   // States tracking live master database lists parameters
   const [categories, setCategories] = useState<any[]>([]);
   const [brands, setBrands] = useState<any[]>([]);
+
   const [groupedUoms, setGroupedUoms] = useState<{ [key: string]: UomItem[] }>({});
 
   const location = useLocation();
@@ -29,19 +32,22 @@ const AddProduct = () => {
   const editData = location.state?.product;
   const isEditMode = !!editData;
 
+
   useEffect(() => {
     const fetchAllMasterMetadata = async () => {
       try {
         setMetadataLoading(true);
+        const activeTenant = tenantId || 'bashir';
         
         // Fetch categories and brands from your custom tables asynchronously
         const { data: catData } = await supabase.from('inventory_categories').select('id, name').order('name', { ascending: true });
         const { data: brandData } = await supabase.from('inventory_brands').select('id, name').order('name', { ascending: true });
         
-        // Strict safety checker filter: Only load international units toggled ON by the manager switchboard
+        // Strict safety checker filter: Only load international units toggled ON by the manager switchboard for this tenant
         const { data: uomData } = await supabase
           .from('inventory_uom')
           .select('*')
+          .eq('tenant_id', activeTenant)
           .eq('is_active', true)
           .order('category', { ascending: true })
           .order('short_code', { ascending: true });

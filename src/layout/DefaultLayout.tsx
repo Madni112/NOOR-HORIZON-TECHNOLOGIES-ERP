@@ -1,6 +1,7 @@
 import React, { useState, ReactNode, useEffect } from 'react';
 import Header from '../components/Header/index';
 import Sidebar from '../components/Sidebar/index';
+import Footer from '../components/Footer/index';
 
 const DefaultLayout: React.FC<{ children: ReactNode }> = ({ children }) => {
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -37,6 +38,8 @@ const DefaultLayout: React.FC<{ children: ReactNode }> = ({ children }) => {
               {children}
             </div>
           </main>
+
+          <Footer />
         </div>
 
       </div>
@@ -45,3 +48,4 @@ const DefaultLayout: React.FC<{ children: ReactNode }> = ({ children }) => {
 };
 
 export default DefaultLayout;
+

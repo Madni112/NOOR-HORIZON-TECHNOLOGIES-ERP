@@ -2,25 +2,57 @@ import React, { useEffect, useState } from 'react';
 import { supabase } from '../../Context/supabaseClient';
 import { toast } from 'react-hot-toast';
 import Spinner from '../../ui/Spinner';
+import { useAuth } from '../../Context/Auth';
 
 const UomManager = () => {
+  const { tenantId } = useAuth();
   const [uoms, setUoms] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
 
   useEffect(() => {
     fetchUomCatalog();
-  }, []);
+  }, [tenantId]);
 
   const fetchUomCatalog = async () => {
     try {
       setLoading(true);
-      const { data, error } = await supabase
+      const activeTenant = tenantId || 'bashir';
+
+      let { data, error } = await supabase
         .from('inventory_uom')
         .select('*')
+        .eq('tenant_id', activeTenant)
         .order('id', { ascending: true });
 
       if (error) throw error;
+
+      // If tenant doesn't have UOM rows yet, seed from base template
+      if (!data || data.length === 0) {
+        const { data: templateData } = await supabase
+          .from('inventory_uom')
+          .select('short_code, full_name, category')
+          .eq('tenant_id', 'bashir');
+
+        if (templateData && templateData.length > 0) {
+          const newRows = templateData.map(t => ({
+            ...t,
+            tenant_id: activeTenant,
+            is_active: t.short_code === 'PCS'
+          }));
+
+          const { data: inserted, error: insertErr } = await supabase
+            .from('inventory_uom')
+            .upsert(newRows, { onConflict: 'tenant_id,short_code' })
+            .select('*')
+            .order('id', { ascending: true });
+
+          if (!insertErr && inserted) {
+            data = inserted;
+          }
+        }
+      }
+
       setUoms(data || []);
     } catch (err: any) {
       toast.error('Failed to load units list from Supabase: ' + err.message);
@@ -28,6 +60,7 @@ const UomManager = () => {
       setLoading(false);
     }
   };
+
 
   // HANDLES LIVE DATABASE UPDATE WHEN USER CLICKS FLIP ON/OFF TOGGLE SWITCH BUTTON
   const handleToggleState = async (id: number | string, currentStatus: boolean) => {

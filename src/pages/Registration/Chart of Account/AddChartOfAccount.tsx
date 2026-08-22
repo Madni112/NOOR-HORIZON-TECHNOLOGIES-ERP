@@ -176,16 +176,31 @@ const AddChartOfAccount = () => {
           onSubmit={async (values) => {
             setLoading(true);
 
-            const databasePayload = {
-              category_code: values.categoryCode,
-              control_code: values.controlCode,
-              account_code: values.accountCode.trim(),
-              account_title: values.accountTitle.trim(),
-              notes: values.notes.trim(),
-              linked_bank_id: values.controlCode === 'Banks' ? values.linkedBankId : null
-            };
+            const cleanCode = values.accountCode.trim();
 
             try {
+              // 1. Pre-check for duplicate account code in chart_of_accounts
+              let checkQuery = supabase.from('chart_of_accounts').select('id, account_code, account_title').eq('account_code', cleanCode);
+              if (isEditMode && editData?.id) {
+                checkQuery = checkQuery.neq('id', editData.id);
+              }
+              const { data: existingAcc } = await checkQuery.maybeSingle();
+
+              if (existingAcc) {
+                toast.error(`Duplicate Code Error: Account code "${cleanCode}" is already used by "${existingAcc.account_title}". Please choose a different unique code.`);
+                setLoading(false);
+                return;
+              }
+
+              const databasePayload = {
+                category_code: values.categoryCode,
+                control_code: values.controlCode,
+                account_code: cleanCode,
+                account_title: values.accountTitle.trim(),
+                notes: values.notes.trim(),
+                linked_bank_id: values.controlCode === 'Banks' ? values.linkedBankId : null
+              };
+
               const { error } = isEditMode
                 ? await supabase.from('chart_of_accounts').update(databasePayload).eq('id', editData.id)
                 : await supabase.from('chart_of_accounts').insert([databasePayload]);
@@ -194,7 +209,11 @@ const AddChartOfAccount = () => {
               toast.success('Account registered successfully!');
               navigate('/Registration/Chart-of-Account/List');
             } catch (err: any) {
-              toast.error(err.message);
+              if (err.code === '23505' || err.message?.includes('duplicate key') || err.message?.includes('unique constraint')) {
+                toast.error(`Duplicate Code: Account Code "${cleanCode}" is already taken. Please enter another code.`);
+              } else {
+                toast.error('Failed to save account: ' + (err.message || 'Unknown error occurred.'));
+              }
             } finally {
               setLoading(false);
             }

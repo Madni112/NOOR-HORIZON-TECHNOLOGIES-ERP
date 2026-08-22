@@ -4,8 +4,11 @@ import { supabase } from '../../../Context/supabaseClient';
 import { toast } from 'react-hot-toast';
 import Spinner from '../../../ui/Spinner';
 import { MdReceipt, MdAssignment, MdDelete } from 'react-icons/md';
+import { useAuth } from '../../../Context/Auth';
+import { recalculateInvoiceSettlementStatus } from '../../../service/financialCalculations';
 
 function VoucherList() {
+  const { tenantId } = useAuth();
   const navigate = useNavigate();
   const [vouchers, setVouchers] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -39,18 +42,35 @@ function VoucherList() {
     if (!window.confirm('Are you sure you want to delete this voucher? This will permanently remove it from the general ledger records.')) return;
 
     try {
+      setLoading(true);
+      // 1. Fetch voucher details to check for linked invoice
+      const { data: voucherToDelete } = await supabase
+        .from('financial_vouchers')
+        .select('original_invoice_no')
+        .eq('id', id)
+        .maybeSingle();
+
       const { error } = await supabase
         .from('financial_vouchers')
         .delete()
         .eq('id', id);
 
       if (error) throw error;
+
+      // 2. Synchronize invoice settlement status
+      if (voucherToDelete?.original_invoice_no) {
+        await recalculateInvoiceSettlementStatus(voucherToDelete.original_invoice_no);
+      }
+
       toast.success('Voucher record deleted cleanly.');
       fetchVoucherLedgerHistory();
     } catch (err: any) {
       toast.error(err.message);
+    } finally {
+      setLoading(false);
     }
   };
+
 
   const filteredVouchers = vouchers.filter((v) =>
     v.voucher_no?.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -77,11 +97,12 @@ function VoucherList() {
         </h2>
         <button
           type="button"
-          onClick={() => navigate('/Registration/Vouchers/Add')}
+          onClick={() => navigate(`${tenantId ? `/${tenantId}` : ''}/Registration/Vouchers/Add`)}
           className="flex items-center justify-center rounded bg-primary py-2 px-4 text-sm font-medium text-white hover:bg-opacity-90 transition duration-150 shadow-sm cursor-pointer"
         >
           + Add New Voucher
         </button>
+
       </div>
 
       <div className="rounded-sm border border-stroke bg-white shadow-default dark:border-strokedark dark:bg-boxdark p-6">
@@ -154,9 +175,10 @@ function VoucherList() {
                       <td className="py-3.5 px-4 text-center text-gray-500 font-medium">{v.voucher_date}</td>
                       <td className="py-3.5 px-4 text-center">
                         <div className="flex items-center justify-center space-x-3">
-                          <button type="button" onClick={() => navigate('/Registration/Vouchers/Add', { state: { voucher: v } })} className="text-gray-500 hover:text-primary transition p-0.5 cursor-pointer" title="View or Edit Voucher Details" >
+                          <button type="button" onClick={() => navigate(`${tenantId ? `/${tenantId}` : ''}/Registration/Vouchers/Add`, { state: { voucher: v } })} className="text-gray-500 hover:text-primary transition p-0.5 cursor-pointer" title="View or Edit Voucher Details" >
                             <MdReceipt size={18} />
                           </button>
+
                           <button type="button" onClick={() => handleDeleteVoucher(v.id)} className="text-gray-500 hover:text-danger transition p-0.5 cursor-pointer" title="Delete Voucher Profile" >
                             <MdDelete size={18} />
                           </button>
