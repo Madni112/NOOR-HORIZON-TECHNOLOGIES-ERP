@@ -1,12 +1,16 @@
 import io from 'socket.io-client';
 import { Socket } from 'socket.io-client';
 
-const SOCKET_URL = import.meta.env.VITE_SOCKET_URL || 'http://localhost:8080';
+const isProd = import.meta.env.PROD;
+const SOCKET_URL = import.meta.env.VITE_SOCKET_URL || (isProd ? '' : 'http://localhost:8080');
 
 let socket: typeof Socket | null = null;
 
 // Initialize Socket Connection
 export const initializeSocket = (): void => {
+  if (!SOCKET_URL || SOCKET_URL.includes('localhost') && isProd) {
+    return;
+  }
   if (!socket) {
     const token = localStorage.getItem('token');
     socket = io(SOCKET_URL, {
@@ -14,7 +18,7 @@ export const initializeSocket = (): void => {
         token,
       },
       autoConnect: true,
-      reconnectionAttempts: 10,
+      reconnectionAttempts: 3,
     });
 
     setupListeners();
