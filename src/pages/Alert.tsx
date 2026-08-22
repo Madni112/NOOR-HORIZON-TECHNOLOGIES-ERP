@@ -11,7 +11,6 @@ const Alert: React.FC = () => {
     { image?: string; message: string }[]
   >([]);
   const audioRef = useRef<HTMLAudioElement | null>(null);
-  console.log('role', role);
   useEffect(() => {
     subscribeToEvent(
       'alert:notification',
