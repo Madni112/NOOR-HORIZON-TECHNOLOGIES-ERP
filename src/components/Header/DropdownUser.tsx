@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import ClickOutside from '../ClickOutside';
 import { LuLogOut } from 'react-icons/lu';
 import { useAuth } from '../../Context/Auth';
+import defaultUserImg from '../../images/logo/authenFace.png';
 
 const DropdownUser = () => {
   const { logout } = useAuth();
@@ -33,10 +34,10 @@ const DropdownUser = () => {
         </span>
 
         <img
-          className="w-16 h-16 border  object-contain rounded-full"
-          src={profile?.image || '../src/images/logo/dummy-profile.png'}
+          className="w-10 h-10 border object-contain rounded-full bg-slate-100 dark:bg-slate-800 p-0.5"
+          src={profile?.image || defaultUserImg}
           onError={(e) => {
-            e.currentTarget.src = '../src/images/logo/dummy-profile.png';
+            e.currentTarget.src = defaultUserImg;
           }}
           alt="User"
         />
