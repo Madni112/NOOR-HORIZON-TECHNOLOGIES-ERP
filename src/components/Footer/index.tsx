@@ -27,7 +27,7 @@ const Footer: React.FC = () => {
 
           <span className="hidden lg:inline text-gray-400 dark:text-gray-600">•</span>
           <span className="hidden lg:inline text-gray-500 dark:text-gray-400">
-            Soft-Hub ERP Enterprise System
+            Noor Horizon Technologies ERP System
           </span>
         </div>
 

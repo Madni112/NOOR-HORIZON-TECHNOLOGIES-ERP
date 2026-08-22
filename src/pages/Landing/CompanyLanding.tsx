@@ -13,23 +13,23 @@ import {
 const CompanyLanding: React.FC = () => {
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 font-sans flex flex-col selection:bg-blue-600 selection:text-white">
-      {/* NAVBAR (100% Clean - No Developer links) */}
+      {/* NAVBAR (100% Clean - Mobile Responsive) */}
       <nav className="border-b border-slate-800/80 bg-slate-900/60 backdrop-blur-md sticky top-0 z-50">
-        <div className="max-w-7xl mx-auto px-6 py-4 flex justify-between items-center">
-          <div className="flex items-center gap-3">
-            <img src={IconDark} alt="NHT Logo" className="h-10 w-auto" />
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 py-4 flex justify-between items-center">
+          <div className="flex items-center gap-2 sm:gap-3">
+            <img src={IconDark} alt="NHT Logo" className="h-8 sm:h-10 w-auto" />
             <div>
-              <div className="flex items-center gap-1.5 font-black text-xl tracking-tight">
+              <div className="flex items-center gap-1 font-black text-base sm:text-xl tracking-tight">
                 <span className="text-blue-500">NOOR HORIZON</span>
                 <span className="text-white">TECHNOLOGIES</span>
               </div>
-              <p className="text-[10px] text-slate-400 font-semibold tracking-wider uppercase">
+              <p className="text-[9px] sm:text-[10px] text-slate-400 font-semibold tracking-wider uppercase">
                 Enterprise Cloud Software Solutions
               </p>
             </div>
           </div>
 
-          <div className="flex items-center gap-6 text-xs font-semibold text-slate-400">
+          <div className="hidden sm:flex items-center gap-6 text-xs font-semibold text-slate-400">
             <span>Products & Solutions</span>
             <span>Digital Invoicing</span>
             <span>Support</span>

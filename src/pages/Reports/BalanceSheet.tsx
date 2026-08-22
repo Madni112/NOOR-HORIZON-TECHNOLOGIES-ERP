@@ -280,7 +280,7 @@ const BalanceSheet: React.FC = () => {
             <span className="text-gray-700">Contact: <b className="text-black font-bold">03128039911</b></span>
           </div>
           <div className="text-[9px] text-gray-400 font-mono">
-            System Generated Statement • Soft-Hub ERP
+            System Generated Statement • Noor Horizon Technologies ERP
           </div>
         </div>
       </div>

@@ -1123,7 +1123,7 @@ const AccountReportPrint = () => {
                         <span className="text-gray-700">Contact: <b className="text-black font-bold">03128039911</b></span>
                     </div>
                     <div className="text-[9px] text-gray-400 font-mono">
-                        System Generated Report • Soft-Hub ERP
+                        System Generated Report • Noor Horizon Technologies ERP
                     </div>
                 </div>
             </div>
