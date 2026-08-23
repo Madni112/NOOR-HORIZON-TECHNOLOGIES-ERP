@@ -1,4 +1,3 @@
-import DropdownNotification from './DropdownNotification';
 import DropdownUser from './DropdownUser';
 import DarkModeSwitcher from './DarkModeSwitcher';
 
@@ -7,8 +6,8 @@ const Header = (props: {
   setSidebarOpen: (arg0: boolean) => void;
 }) => {
   return (
-    <header className="w-full relative">
-      <div className="flex flex-grow items-center bg-white drop-shadow-1 dark:bg-boxdark justify-between px-4 py-4 md:px-6 2xl:px-11">
+    <header className="sticky top-0 z-999 flex w-full bg-white drop-shadow-1 dark:bg-boxdark dark:drop-shadow-none">
+      <div className="flex flex-grow items-center justify-between px-4 py-4 md:px-6 2xl:px-11">
         <div className="flex-1 lg:block hidden"></div>
 
         <div className="flex items-center gap-3 2xsm:gap-7">

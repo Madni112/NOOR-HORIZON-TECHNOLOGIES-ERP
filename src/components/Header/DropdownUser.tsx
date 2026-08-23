@@ -74,10 +74,10 @@ const DropdownUser = () => {
   const displayCompanyName = companyName || formatSlug(activeTenant);
 
   return (
-    <ClickOutside onClick={() => setDropdownOpen(false)} className="relative">
+    <ClickOutside onClick={() => setDropdownOpen(false)} className="relative z-9999">
       <Link
         onClick={() => setDropdownOpen(!dropdownOpen)}
-        className="flex items-center gap-3.5"
+        className="flex items-center gap-3.5 cursor-pointer select-none"
         to="#"
       >
         <span className="hidden text-right lg:block">
@@ -122,10 +122,11 @@ const DropdownUser = () => {
       {/* <!-- Dropdown Start --> */}
       {dropdownOpen && (
         <div
-          className="absolute right-0 mt-3 flex w-72 flex-col rounded-lg border border-stroke bg-white shadow-xl dark:border-strokedark dark:bg-boxdark z-50 overflow-hidden"
+          className="absolute right-0 mt-3 flex w-72 flex-col rounded-lg border border-stroke bg-white shadow-2xl dark:border-strokedark dark:bg-boxdark z-99999 overflow-hidden"
+          style={{ zIndex: 99999 }}
         >
           {/* Client Company Name & Details (Above Log Out) */}
-          <div className="px-5 py-3.5 bg-gray-50/80 dark:bg-meta-4/40 border-b border-stroke dark:border-strokedark">
+          <div className="px-5 py-3.5 bg-gray-50/90 dark:bg-meta-4/60 border-b border-stroke dark:border-strokedark">
             <div className="flex items-center gap-1.5 mb-1 text-primary">
               <LuBuilding2 size={15} />
               <span className="text-[11px] font-extrabold uppercase tracking-wider text-gray-500 dark:text-gray-400">
